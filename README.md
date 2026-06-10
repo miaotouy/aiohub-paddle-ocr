@@ -23,6 +23,12 @@ E:\rc20\allinweb\all-in-one-tools\src\tools\smart-ocr\docs\Plan\paddle-ocr-plugi
 - 真实模型文件 `det.mnn`、`rec.mnn`、`keys.txt` 放置与校验 hash。
 - 有模型后的 OCR benchmark 与 ZIP 验收。
 
+模型下载与转换说明见：
+
+```txt
+models/ppocr-v5-mobile/README.md
+```
+
 ## 1. 目标
 
 实现官方 Paddle OCR sidecar 插件，让 Smart OCR 可以通过统一插件执行器调用：
