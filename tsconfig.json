@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "preserve",
+    "strict": true,
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": {
+      "aiohub-sdk": ["../../src/services/plugin-sdk"],
+      "aiohub-ui": ["../../src/services/plugin-ui"],
+      "@/*": ["../../src/*"]
+    }
+  },
+  "include": ["*.ts", "*.vue", "src/**/*.ts", "src/**/*.d.ts"]
+}

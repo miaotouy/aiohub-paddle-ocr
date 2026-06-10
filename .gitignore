@@ -1,0 +1,11 @@
+/target/
+/dist/
+/dist-ui/
+/node_modules/
+/bun.lockb
+*.zip
+*.log
+
+# Real model assets are distributed in release packages, not source commits.
+/models/ppocr-v5-mobile/*.mnn
+/models/ppocr-v5-mobile/keys.txt

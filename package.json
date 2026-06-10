@@ -1,0 +1,29 @@
+{
+  "name": "aiohub-paddle-ocr-plugin",
+  "version": "0.1.0",
+  "description": "AIO Hub Paddle OCR sidecar 插件",
+  "type": "module",
+  "scripts": {
+    "build": "bun build.js",
+    "build:rust": "cargo build",
+    "build:rust:release": "cargo build --release",
+    "build:vue": "bun x vite build",
+    "package": "bun build.js --release --package",
+    "clean": "cargo clean && bun x rimraf dist dist-ui *.zip"
+  },
+  "keywords": [
+    "aio-hub",
+    "plugin",
+    "sidecar",
+    "paddle-ocr",
+    "ocr"
+  ],
+  "author": "AIO Hub Team",
+  "license": "MIT",
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.7",
+    "archiver": "^7.0.1",
+    "rimraf": "^5.0.7",
+    "vite": "^8.0.16"
+  }
+}

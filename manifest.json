@@ -1,0 +1,47 @@
+{
+  "id": "paddle-ocr",
+  "name": "Paddle OCR",
+  "version": "0.1.0",
+  "description": "基于 PaddleOCR 的本地离线 OCR 插件",
+  "author": "AIO Hub Team",
+  "icon": "🔎",
+  "tags": ["OCR", "PaddleOCR", "本地模型"],
+  "host": {
+    "appVersion": ">=0.6.3-alpha.5",
+    "apiVersion": 2
+  },
+  "type": "sidecar",
+  "sidecar": {
+    "executable": {
+      "win32-x64": "target/x86_64-pc-windows-msvc/debug/aiohub-paddle-ocr.exe"
+    },
+    "args": []
+  },
+  "methods": [
+    {
+      "name": "recognizeBatch",
+      "displayName": "批量 OCR 识别",
+      "description": "使用本地 PaddleOCR 模型批量识别图片块中的文字",
+      "parameters": [
+        {
+          "name": "images",
+          "type": "array",
+          "required": true,
+          "description": "待识别图片块列表"
+        },
+        {
+          "name": "options",
+          "type": "object",
+          "required": false,
+          "description": "模型、语言和识别参数"
+        }
+      ],
+      "returnType": "Promise<PaddleOcrBatchResult>"
+    }
+  ],
+  "ui": {
+    "displayName": "Paddle OCR",
+    "component": "PaddleOcr.vue",
+    "icon": "🔎"
+  }
+}
