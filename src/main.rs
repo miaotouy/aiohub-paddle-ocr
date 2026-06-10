@@ -1,8 +1,9 @@
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use ocr_rs::{DetOptions, OcrEngine, OcrEngineConfig};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Read};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Instant;
@@ -122,6 +123,10 @@ enum SidecarError {
     MissingModelFile(String),
     #[error("模型文件为空: {0}")]
     EmptyModelFile(String),
+    #[error("模型文件格式不正确: {0}。当前文件看起来是 safetensors 权重，请先转换为 MNN 模型后再命名为 det.mnn/rec.mnn")]
+    InvalidModelFormat(String),
+    #[error("加载 OCR 引擎失败: {0}")]
+    EngineLoadFailed(String),
 }
 
 #[derive(Debug, Error)]
@@ -130,8 +135,10 @@ enum ImageError {
     InvalidDataUrl,
     #[error("图片 base64 解码失败: {0}")]
     InvalidBase64(String),
-    #[error("Paddle OCR 推理尚未接入当前 POC sidecar")]
-    InferenceNotImplemented,
+    #[error("图片解码失败: {0}")]
+    InvalidImage(String),
+    #[error("OCR 推理失败: {0}")]
+    InferenceFailed(String),
 }
 
 fn main() {
@@ -182,7 +189,7 @@ fn recognize_batch(request: RecognizeBatchRequest) -> Result<(), SidecarError> {
     let model_dir = validate_model_files(model_profile)?;
 
     send_progress(20, "正在加载 OCR 后端");
-    let engine = PaddleOcrEngine::load(&model_dir);
+    let engine = PaddleOcrEngine::load(&model_dir, request.options.as_ref())?;
 
     let total = request.images.len();
     let mut results = Vec::with_capacity(total);
@@ -238,9 +245,29 @@ fn validate_model_files(model_profile: &str) -> Result<PathBuf, SidecarError> {
                 file_path.display().to_string(),
             ));
         }
+
+        if file_name.ends_with(".mnn") && looks_like_safetensors(&file_path) {
+            return Err(SidecarError::InvalidModelFormat(
+                file_path.display().to_string(),
+            ));
+        }
     }
 
     Ok(model_dir)
+}
+
+fn looks_like_safetensors(file_path: &Path) -> bool {
+    let mut file = match fs::File::open(file_path) {
+        Ok(file) => file,
+        Err(_) => return false,
+    };
+    let mut header = [0_u8; 128];
+    let read_len = match file.read(&mut header) {
+        Ok(read_len) => read_len,
+        Err(_) => return false,
+    };
+
+    read_len >= 16 && header[8] == b'{' && header[9..read_len].windows(7).any(|w| w == b"\"dtype\"")
 }
 
 fn recognize_single_image(engine: &PaddleOcrEngine, image: &OcrImageInput) -> PaddleOcrImageResult {
@@ -293,20 +320,75 @@ fn average_confidence(lines: &[OcrLine]) -> Option<f32> {
 }
 
 struct PaddleOcrEngine {
-    #[allow(dead_code)]
-    model_dir: PathBuf,
+    engine: OcrEngine,
 }
 
 impl PaddleOcrEngine {
-    fn load(model_dir: &Path) -> Self {
-        Self {
-            model_dir: model_dir.to_path_buf(),
+    fn load(model_dir: &Path, options: Option<&OcrOptions>) -> Result<Self, SidecarError> {
+        let det_path = model_dir.join("det.mnn");
+        let rec_path = model_dir.join("rec.mnn");
+        let keys_path = model_dir.join("keys.txt");
+        let config = build_engine_config(options);
+        let engine = OcrEngine::new(det_path, rec_path, keys_path, Some(config))
+            .map_err(|error| SidecarError::EngineLoadFailed(error.to_string()))?;
+
+        Ok(Self { engine })
+    }
+
+    fn recognize(&self, image_bytes: &[u8]) -> Result<Vec<OcrLine>, ImageError> {
+        let image = image::load_from_memory(image_bytes)
+            .map_err(|error| ImageError::InvalidImage(error.to_string()))?;
+        let results = self
+            .engine
+            .recognize(&image)
+            .map_err(|error| ImageError::InferenceFailed(error.to_string()))?;
+
+        Ok(results
+            .into_iter()
+            .map(|result| OcrLine {
+                text: result.text,
+                score: result.confidence,
+                bbox: bbox_points(&result.bbox),
+            })
+            .collect())
+    }
+}
+
+fn build_engine_config(options: Option<&OcrOptions>) -> OcrEngineConfig {
+    let mut det_options = DetOptions::default();
+
+    if let Some(options) = options {
+        if let Some(limit) = options.det_limit_side_len {
+            det_options.max_side_len = limit;
+        }
+        if let Some(threshold) = options.det_thresh {
+            det_options.score_threshold = threshold;
+        }
+        if let Some(threshold) = options.box_thresh {
+            det_options.box_threshold = threshold;
+        }
+        if let Some(ratio) = options.unclip_ratio {
+            det_options.unclip_ratio = ratio;
         }
     }
 
-    fn recognize(&self, _image_bytes: &[u8]) -> Result<Vec<OcrLine>, ImageError> {
-        Err(ImageError::InferenceNotImplemented)
+    OcrEngineConfig::new().with_det_options(det_options)
+}
+
+fn bbox_points(text_box: &ocr_rs::TextBox) -> Vec<[f32; 2]> {
+    if let Some(points) = text_box.points {
+        return points
+            .iter()
+            .map(|point| [point.x, point.y])
+            .collect::<Vec<_>>();
     }
+
+    let left = text_box.rect.left() as f32;
+    let top = text_box.rect.top() as f32;
+    let right = left + text_box.rect.width() as f32;
+    let bottom = top + text_box.rect.height() as f32;
+
+    vec![[left, top], [right, top], [right, bottom], [left, bottom]]
 }
 
 fn send_progress(percent: u32, message: &str) {

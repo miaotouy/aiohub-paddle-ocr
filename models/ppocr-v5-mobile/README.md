@@ -8,7 +8,7 @@ rec.mnn
 keys.txt
 ```
 
-源码仓库不提交真实模型文件。打包脚本会在 `--package` 时校验这些文件存在且大小不为 0。
+源码仓库不提交真实模型文件。打包脚本会在 `--package` 时校验这些文件存在、大小不为 0，并拦截误把 safetensors 权重重命名成 `.mnn` 的情况。
 
 ## 上游下载源
 
@@ -40,6 +40,8 @@ det.mnn <- PP-OCRv5_mobile_det 转换产物
 rec.mnn <- PP-OCRv5_mobile_rec 转换产物
 keys.txt <- ppocrv5_dict.txt 重命名或复制
 ```
+
+注意：Hugging Face / ModelScope 上的 `*_safetensors` 文件不能直接改名为 `.mnn` 使用。它们需要先通过 PaddleOCR 导出或 ONNX 中转，再用 MNNConvert 生成真正的 MNN flatbuffer；否则 sidecar 会返回“模型文件格式不正确”。
 
 如果最终选择 ONNX Runtime、Paddle Inference 或其他 Rust OCR 库，而不是 MNN，需要同步修改：
 

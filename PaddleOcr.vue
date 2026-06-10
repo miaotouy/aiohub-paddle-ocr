@@ -152,7 +152,7 @@ const runSmokeTest = async () => {
       {
         blockId: 'smoke-test-block',
         imageId: 'smoke-test-image',
-        dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+        dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
         width: 1,
         height: 1
       }

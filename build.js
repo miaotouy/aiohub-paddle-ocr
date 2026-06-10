@@ -98,6 +98,7 @@ function buildTarget(targetKey) {
 function validateModelFiles() {
   const missing = [];
   const empty = [];
+  const invalid = [];
 
   for (const relativePath of MODEL_FILES) {
     const fullPath = path.join(__dirname, relativePath);
@@ -109,10 +110,15 @@ function validateModelFiles() {
     const stats = fs.statSync(fullPath);
     if (!stats.isFile() || stats.size === 0) {
       empty.push(relativePath);
+      continue;
+    }
+
+    if (relativePath.endsWith('.mnn') && looksLikeSafetensors(fullPath)) {
+      invalid.push(relativePath);
     }
   }
 
-  if (missing.length > 0 || empty.length > 0) {
+  if (missing.length > 0 || empty.length > 0 || invalid.length > 0) {
     console.error('模型文件校验失败，无法打包发布 ZIP。');
     if (missing.length > 0) {
       console.error(`缺失: ${missing.join(', ')}`);
@@ -120,7 +126,24 @@ function validateModelFiles() {
     if (empty.length > 0) {
       console.error(`空文件: ${empty.join(', ')}`);
     }
+    if (invalid.length > 0) {
+      console.error(`格式错误，疑似 safetensors 而不是 MNN: ${invalid.join(', ')}`);
+      console.error('请先把 PaddleOCR 模型转换为 MNN，再命名为 det.mnn / rec.mnn。');
+    }
     process.exit(1);
+  }
+}
+
+function looksLikeSafetensors(fullPath) {
+  const fd = fs.openSync(fullPath, 'r');
+  try {
+    const buffer = Buffer.alloc(128);
+    const readLen = fs.readSync(fd, buffer, 0, buffer.length, 0);
+    return readLen >= 16
+      && buffer[8] === 0x7b
+      && buffer.subarray(9, readLen).includes(Buffer.from('"dtype"'));
+  } finally {
+    fs.closeSync(fd);
   }
 }
 

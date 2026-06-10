@@ -9,3 +9,4 @@
 # Real model assets are distributed in release packages, not source commits.
 /models/ppocr-v5-mobile/*.mnn
 /models/ppocr-v5-mobile/keys.txt
+/models/ppocr-v5-mobile/ppocr_keys*.txt
