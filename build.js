@@ -22,11 +22,95 @@ const TARGETS = {
   }
 };
 
-const MODEL_FILES = [
-  'models/ppocr-v5-mobile/det.mnn',
-  'models/ppocr-v5-mobile/rec.mnn',
-  'models/ppocr-v5-mobile/keys.txt'
+const MODEL_DIR = 'models/ppocr-v5-mobile';
+const DET_MODEL_FILE = 'ppocrv5_mobile_det.mnn';
+const MODEL_PROFILES = [
+  {
+    id: 'ppocr-v5-mobile-general',
+    name: 'PP-OCRv5 Mobile General',
+    language: 'general',
+    recFile: 'ppocrv5_mobile_rec_general.mnn',
+    dictFile: 'ppocrv5_mobile_dict_general.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-en',
+    name: 'PP-OCRv5 Mobile English',
+    language: 'en',
+    recFile: 'ppocrv5_mobile_rec_en.mnn',
+    dictFile: 'ppocrv5_mobile_dict_en.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-ko',
+    name: 'PP-OCRv5 Mobile Korean',
+    language: 'ko',
+    recFile: 'ppocrv5_mobile_rec_ko.mnn',
+    dictFile: 'ppocrv5_mobile_dict_ko.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-latin',
+    name: 'PP-OCRv5 Mobile Latin',
+    language: 'latin',
+    recFile: 'ppocrv5_mobile_rec_latin.mnn',
+    dictFile: 'ppocrv5_mobile_dict_latin.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-arabic',
+    name: 'PP-OCRv5 Mobile Arabic',
+    language: 'arabic',
+    recFile: 'ppocrv5_mobile_rec_arabic.mnn',
+    dictFile: 'ppocrv5_mobile_dict_arabic.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-cyrillic',
+    name: 'PP-OCRv5 Mobile Cyrillic',
+    language: 'cyrillic',
+    recFile: 'ppocrv5_mobile_rec_cyrillic.mnn',
+    dictFile: 'ppocrv5_mobile_dict_cyrillic.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-el',
+    name: 'PP-OCRv5 Mobile Greek',
+    language: 'el',
+    recFile: 'ppocrv5_mobile_rec_el.mnn',
+    dictFile: 'ppocrv5_mobile_dict_el.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-devanagari',
+    name: 'PP-OCRv5 Mobile Devanagari',
+    language: 'devanagari',
+    recFile: 'ppocrv5_mobile_rec_devanagari.mnn',
+    dictFile: 'ppocrv5_mobile_dict_devanagari.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-ta',
+    name: 'PP-OCRv5 Mobile Tamil',
+    language: 'ta',
+    recFile: 'ppocrv5_mobile_rec_ta.mnn',
+    dictFile: 'ppocrv5_mobile_dict_ta.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-te',
+    name: 'PP-OCRv5 Mobile Telugu',
+    language: 'te',
+    recFile: 'ppocrv5_mobile_rec_te.mnn',
+    dictFile: 'ppocrv5_mobile_dict_te.txt'
+  },
+  {
+    id: 'ppocr-v5-mobile-th',
+    name: 'PP-OCRv5 Mobile Thai',
+    language: 'th',
+    recFile: 'ppocrv5_mobile_rec_th.mnn',
+    dictFile: 'ppocrv5_mobile_dict_th.txt'
+  }
 ];
+
+const MODEL_FILES = Array.from(new Set([
+  `${MODEL_DIR}/${DET_MODEL_FILE}`,
+  ...MODEL_PROFILES.flatMap((profile) => [
+    `${MODEL_DIR}/${profile.recFile}`,
+    `${MODEL_DIR}/${profile.dictFile}`
+  ])
+]));
 
 const CURRENT_PLATFORM = process.platform === 'win32' ? 'windows'
   : process.platform === 'darwin' ? 'macos'
@@ -128,7 +212,7 @@ function validateModelFiles() {
     }
     if (invalid.length > 0) {
       console.error(`格式错误，疑似 safetensors 而不是 MNN: ${invalid.join(', ')}`);
-      console.error('请先把 PaddleOCR 模型转换为 MNN，再命名为 det.mnn / rec.mnn。');
+      console.error('请先把 PaddleOCR 模型转换为真正的 MNN，再放入模型目录。');
     }
     process.exit(1);
   }
@@ -158,7 +242,7 @@ function packagePlugin() {
   const target = TARGETS[targetPlatform];
   const distDir = path.join(__dirname, 'dist');
   const binDir = path.join(distDir, 'bin');
-  const modelDestDir = path.join(distDir, 'models', 'ppocr-v5-mobile');
+  const modelDestDir = path.join(distDir, MODEL_DIR);
 
   ensureDir(binDir);
   ensureDir(modelDestDir);
@@ -183,7 +267,7 @@ function packagePlugin() {
     for (const relativePath of MODEL_FILES) {
       const fileName = path.basename(relativePath);
       fs.copyFileSync(path.join(__dirname, relativePath), path.join(modelDestDir, fileName));
-      console.log(`复制模型 -> models/ppocr-v5-mobile/${fileName}`);
+      console.log(`复制模型 -> ${MODEL_DIR}/${fileName}`);
     }
   }
 

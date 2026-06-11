@@ -48,11 +48,62 @@
       "method": "recognizeBatch",
       "modelProfiles": [
         {
-          "id": "ppocr-v5-mobile",
-          "name": "PP-OCRv5 Mobile"
+          "id": "ppocr-v5-mobile-general",
+          "name": "PP-OCRv5 Mobile 通用",
+          "language": "general"
+        },
+        {
+          "id": "ppocr-v5-mobile-en",
+          "name": "PP-OCRv5 Mobile 英文",
+          "language": "en"
+        },
+        {
+          "id": "ppocr-v5-mobile-ko",
+          "name": "PP-OCRv5 Mobile 韩文",
+          "language": "ko"
+        },
+        {
+          "id": "ppocr-v5-mobile-latin",
+          "name": "PP-OCRv5 Mobile 拉丁文字",
+          "language": "latin"
+        },
+        {
+          "id": "ppocr-v5-mobile-arabic",
+          "name": "PP-OCRv5 Mobile 阿拉伯文字",
+          "language": "arabic"
+        },
+        {
+          "id": "ppocr-v5-mobile-cyrillic",
+          "name": "PP-OCRv5 Mobile 西里尔文字",
+          "language": "cyrillic"
+        },
+        {
+          "id": "ppocr-v5-mobile-el",
+          "name": "PP-OCRv5 Mobile 希腊文",
+          "language": "el"
+        },
+        {
+          "id": "ppocr-v5-mobile-devanagari",
+          "name": "PP-OCRv5 Mobile 天城文",
+          "language": "devanagari"
+        },
+        {
+          "id": "ppocr-v5-mobile-ta",
+          "name": "PP-OCRv5 Mobile 泰米尔文",
+          "language": "ta"
+        },
+        {
+          "id": "ppocr-v5-mobile-te",
+          "name": "PP-OCRv5 Mobile 泰卢固文",
+          "language": "te"
+        },
+        {
+          "id": "ppocr-v5-mobile-th",
+          "name": "PP-OCRv5 Mobile 泰文",
+          "language": "th"
         }
       ],
-      "defaultModelProfile": "ppocr-v5-mobile"
+      "defaultModelProfile": "ppocr-v5-mobile-general"
     }
   ],
   "ui": {

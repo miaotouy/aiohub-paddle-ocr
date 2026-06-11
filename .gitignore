@@ -10,3 +10,4 @@
 /models/ppocr-v5-mobile/*.mnn
 /models/ppocr-v5-mobile/keys.txt
 /models/ppocr-v5-mobile/ppocr_keys*.txt
+/models/ppocr-v5-mobile/ppocrv5_mobile_dict*.txt

@@ -3,9 +3,17 @@
     <header class="toolbar">
       <div>
         <h2>Paddle OCR</h2>
-        <p>v{{ version }} · {{ modelProfile }}</p>
+        <p>v{{ version }} · {{ selectedProfileName }}</p>
       </div>
       <div class="toolbar-actions">
+        <el-select v-model="selectedProfileId" class="profile-select" size="default">
+          <el-option
+            v-for="profile in modelProfiles"
+            :key="profile.id"
+            :label="profile.name"
+            :value="profile.id"
+          />
+        </el-select>
         <el-button :loading="checking" @click="checkRuntime">检查</el-button>
         <el-button type="primary" :loading="testing" @click="runSmokeTest">测试</el-button>
       </div>
@@ -25,8 +33,8 @@
         <strong>{{ lastDurationText }}</strong>
       </div>
       <div class="status-item">
-        <span class="label">图片数量</span>
-        <strong>{{ lastImageCount }}</strong>
+        <span class="label">模型数量</span>
+        <strong>{{ modelProfiles.length }}</strong>
       </div>
     </section>
 
@@ -66,11 +74,49 @@ interface PaddleOcrResult {
 }
 
 const version = '0.1.0';
-const modelProfile = 'ppocr-v5-mobile';
-const modelFiles = ['det.mnn', 'rec.mnn', 'keys.txt'];
+const defaultModelProfile = 'ppocr-v5-mobile-general';
+const modelProfiles = [
+  { id: 'ppocr-v5-mobile-general', name: '通用', language: 'general' },
+  { id: 'ppocr-v5-mobile-en', name: '英文', language: 'en' },
+  { id: 'ppocr-v5-mobile-ko', name: '韩文', language: 'ko' },
+  { id: 'ppocr-v5-mobile-latin', name: '拉丁文字', language: 'latin' },
+  { id: 'ppocr-v5-mobile-arabic', name: '阿拉伯文字', language: 'arabic' },
+  { id: 'ppocr-v5-mobile-cyrillic', name: '西里尔文字', language: 'cyrillic' },
+  { id: 'ppocr-v5-mobile-el', name: '希腊文', language: 'el' },
+  { id: 'ppocr-v5-mobile-devanagari', name: '天城文', language: 'devanagari' },
+  { id: 'ppocr-v5-mobile-ta', name: '泰米尔文', language: 'ta' },
+  { id: 'ppocr-v5-mobile-te', name: '泰卢固文', language: 'te' },
+  { id: 'ppocr-v5-mobile-th', name: '泰文', language: 'th' }
+];
+const modelFiles = [
+  'ppocrv5_mobile_det.mnn',
+  'ppocrv5_mobile_rec_general.mnn',
+  'ppocrv5_mobile_dict_general.txt',
+  'ppocrv5_mobile_rec_en.mnn',
+  'ppocrv5_mobile_dict_en.txt',
+  'ppocrv5_mobile_rec_ko.mnn',
+  'ppocrv5_mobile_dict_ko.txt',
+  'ppocrv5_mobile_rec_latin.mnn',
+  'ppocrv5_mobile_dict_latin.txt',
+  'ppocrv5_mobile_rec_arabic.mnn',
+  'ppocrv5_mobile_dict_arabic.txt',
+  'ppocrv5_mobile_rec_cyrillic.mnn',
+  'ppocrv5_mobile_dict_cyrillic.txt',
+  'ppocrv5_mobile_rec_el.mnn',
+  'ppocrv5_mobile_dict_el.txt',
+  'ppocrv5_mobile_rec_devanagari.mnn',
+  'ppocrv5_mobile_dict_devanagari.txt',
+  'ppocrv5_mobile_rec_ta.mnn',
+  'ppocrv5_mobile_dict_ta.txt',
+  'ppocrv5_mobile_rec_te.mnn',
+  'ppocrv5_mobile_dict_te.txt',
+  'ppocrv5_mobile_rec_th.mnn',
+  'ppocrv5_mobile_dict_th.txt'
+];
 
 const checking = ref(false);
 const testing = ref(false);
+const selectedProfileId = ref(defaultModelProfile);
 const runtimeStatus = ref<'idle' | 'ready' | 'error'>('idle');
 const modelStatus = ref<'unknown' | 'ready' | 'missing'>('unknown');
 const lastDurationMs = ref<number | null>(null);
@@ -100,6 +146,9 @@ const lastResultLabel = computed(() => (
 const lastResultText = computed(() => (
   lastResult.value ? JSON.stringify(lastResult.value, null, 2) : ''
 ));
+const selectedProfileName = computed(() => (
+  modelProfiles.find((profile) => profile.id === selectedProfileId.value)?.name || selectedProfileId.value
+));
 
 const callRecognizeBatch = async (images: unknown[]) => {
   const startedAt = performance.now();
@@ -109,7 +158,7 @@ const callRecognizeBatch = async (images: unknown[]) => {
     params: {
       images,
       options: {
-        modelProfile
+        modelProfile: selectedProfileId.value
       }
     }
   }) as PaddleOcrResult;
@@ -212,9 +261,14 @@ const runSmokeTest = async () => {
 
 .toolbar-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.profile-select {
+  width: 180px;
 }
 
 .status-grid {
