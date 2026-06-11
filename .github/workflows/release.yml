@@ -122,19 +122,86 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Upload GitHub Release assets
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: Create GitHub Release draft
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get release info
+        id: get-release-info
+        shell: bash
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION="${{ github.ref_name }}"
+            RELEASE_NAME="Paddle OCR Plugin ${VERSION}"
+            IS_MAIN_DRAFT="false"
+          else
+            VERSION="main"
+            RELEASE_NAME="Paddle OCR Plugin main 草案 (${SHORT_SHA})"
+            IS_MAIN_DRAFT="true"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "name=${RELEASE_NAME}" >> $GITHUB_OUTPUT
+          echo "is_main_draft=${IS_MAIN_DRAFT}" >> $GITHUB_OUTPUT
+
       - name: Download workflow artifacts
         uses: actions/download-artifact@v4
         with:
-          path: release-assets
-          merge-multiple: true
+          path: artifacts
+          merge-multiple: false
 
-      - name: Upload plugin ZIP to GitHub Release
+      - name: Prepare release files
+        shell: bash
+        run: |
+          mkdir -p release-files
+
+          echo "=== Downloaded artifacts ==="
+          find artifacts -type f -ls
+
+          echo "=== Copy plugin ZIP files ==="
+          find artifacts -type f -name "*.zip" -exec cp {} release-files/ \;
+
+          echo "=== Release files ==="
+          ls -lh release-files/
+
+      - name: Create release draft and upload plugin ZIP files
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/*.zip
+          tag_name: ${{ steps.get-release-info.outputs.version }}
+          name: ${{ steps.get-release-info.outputs.name }}
+          body: |
+            ## Paddle OCR 插件发布草稿
+
+            ### 构建流水线
+            - Workflow: `${{ github.workflow }}`
+            - Run: `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`
+            - Commit: `${{ github.sha }}`
+
+            ### 检查清单
+            - 确认六个平台 ZIP 都已上传。
+            - 抽查一个 ZIP，确认包含 `manifest.json`、`bin/`、`models/ppocr-v5-mobile/` 和管理页 JS。
+            - 如为正式版本，确认版本号与 `manifest.json`、`package.json` 保持一致后再发布。
+
+            ### 发布包
+            本次流水线会上传以下平台的离线插件 ZIP：
+
+            - `paddle-ocr-v*-windows-x64.zip`
+            - `paddle-ocr-v*-windows-arm64.zip`
+            - `paddle-ocr-v*-macos-x64.zip`
+            - `paddle-ocr-v*-macos-arm64.zip`
+            - `paddle-ocr-v*-linux-x64.zip`
+            - `paddle-ocr-v*-linux-arm64.zip`
+
+            ### 使用说明
+            在 AIO Hub 插件管理页面选择本机平台对应的 ZIP 手动导入。发布包已包含 PaddleOCR sidecar、管理页、manifest 和 PP-OCRv5 Mobile 模型文件。
+
+          draft: true
+          prerelease: ${{ steps.get-release-info.outputs.is_main_draft == 'true' || contains(steps.get-release-info.outputs.version, 'beta') || contains(steps.get-release-info.outputs.version, 'alpha') || contains(steps.get-release-info.outputs.version, 'dev') }}
+          make_latest: ${{ steps.get-release-info.outputs.is_main_draft != 'true' }}
+          files: release-files/*.zip
+
