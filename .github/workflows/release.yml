@@ -1,0 +1,107 @@
+name: Release Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  MODEL_BUNDLE_URL: https://github.com/miaotouy/aiohub-paddle-ocr/releases/download/modelsv1/aiohub-paddle-ocr-models-ppocr-v5-mobile-v1.tar.gz
+  MODEL_BUNDLE_SHA256: 2615c35c0aa33bb4ea21ec8a1de6a33cc8823d68d524f36f0e3cbb17777d63de
+  RUST_TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  build-windows-x64:
+    name: Build Windows x64
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.RUST_TARGET }}
+
+      - name: Install frontend dependencies
+        run: bun install
+
+      - name: Download and verify OCR models
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Invoke-WebRequest -Uri $env:MODEL_BUNDLE_URL -OutFile model-bundle.tar.gz
+
+          $actualHash = (Get-FileHash -Algorithm SHA256 -Path model-bundle.tar.gz).Hash.ToLowerInvariant()
+          if ($actualHash -ne $env:MODEL_BUNDLE_SHA256) {
+            throw "Model bundle SHA256 mismatch. Expected $env:MODEL_BUNDLE_SHA256, got $actualHash."
+          }
+
+          tar -xzf model-bundle.tar.gz
+
+          if (-not (Test-Path -Path "models/ppocr-v5-mobile")) {
+            throw "Model bundle did not extract models/ppocr-v5-mobile."
+          }
+
+          if (-not (Test-Path -Path "SHA256SUMS.txt")) {
+            throw "Model bundle is missing SHA256SUMS.txt."
+          }
+
+          $badFiles = @()
+          foreach ($line in Get-Content -Path "SHA256SUMS.txt") {
+            if ([string]::IsNullOrWhiteSpace($line)) {
+              continue
+            }
+
+            $parts = $line -split "\s+", 2
+            if ($parts.Count -ne 2) {
+              $badFiles += "invalid checksum line: $line"
+              continue
+            }
+
+            $expected = $parts[0]
+            $relativePath = $parts[1]
+            $localPath = $relativePath -replace "/", [System.IO.Path]::DirectorySeparatorChar
+
+            if (-not (Test-Path -LiteralPath $localPath)) {
+              $badFiles += "missing: $relativePath"
+              continue
+            }
+
+            $fileHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $localPath).Hash.ToLowerInvariant()
+            if ($fileHash -ne $expected) {
+              $badFiles += "mismatch: $relativePath"
+            }
+          }
+
+          if ($badFiles.Count -gt 0) {
+            $badFiles | ForEach-Object { Write-Error $_ }
+            throw "Model file checksum verification failed."
+          }
+
+          Get-ChildItem -Path "models/ppocr-v5-mobile" -File
+
+      - name: Package plugin
+        run: bun run package
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: paddle-ocr-windows-x64
+          path: paddle-ocr-v*-windows-x64.zip
+          if-no-files-found: error
+
+      - name: Upload plugin ZIP to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: paddle-ocr-v*-windows-x64.zip

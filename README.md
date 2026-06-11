@@ -126,6 +126,29 @@ sidecar 启动时会检查：
 - 模型文件是否为空。
 - `.mnn` 文件是否疑似 safetensors 权重误改名。
 
+## CI/CD 发布
+
+本仓库通过 GitHub Actions 打包 Windows x64 插件发布包。源码仓库不提交真实模型文件，发布流水线会从本仓库 Release 中下载模型包，校验 SHA256 后解压到 `models/ppocr-v5-mobile/`，再执行 `bun run package`。
+
+当前模型包：
+
+```txt
+https://github.com/miaotouy/aiohub-paddle-ocr/releases/download/modelsv1/aiohub-paddle-ocr-models-ppocr-v5-mobile-v1.tar.gz
+```
+
+SHA256：
+
+```txt
+2615c35c0aa33bb4ea21ec8a1de6a33cc8823d68d524f36f0e3cbb17777d63de
+```
+
+发布方式：
+
+- 手动试跑：在 GitHub Actions 页面运行 `Release Plugin` workflow，产物会作为 workflow artifact 上传。
+- 正式发布：推送 `v*` tag，例如 `v0.1.0`，workflow 会构建 `paddle-ocr-v*-windows-x64.zip` 并上传到该 tag 对应的 GitHub Release。
+
+模型来源和许可记录见 [MODEL_THIRD_PARTY_NOTICES.md](MODEL_THIRD_PARTY_NOTICES.md)。
+
 ## 调用协议
 
 主应用每次执行插件方法时，会启动 sidecar 并向 stdin 写入一行 JSON：
