@@ -19,6 +19,36 @@ const TARGETS = {
     executable: 'aiohub-paddle-ocr.exe',
     manifestKey: 'win32-x64',
     packageExecutable: 'aiohub-paddle-ocr-windows-x64.exe'
+  },
+  'windows-arm64': {
+    rustTarget: 'aarch64-pc-windows-msvc',
+    executable: 'aiohub-paddle-ocr.exe',
+    manifestKey: 'win32-arm64',
+    packageExecutable: 'aiohub-paddle-ocr-windows-arm64.exe'
+  },
+  'macos-x64': {
+    rustTarget: 'x86_64-apple-darwin',
+    executable: 'aiohub-paddle-ocr',
+    manifestKey: 'darwin-x64',
+    packageExecutable: 'aiohub-paddle-ocr-macos-x64'
+  },
+  'macos-arm64': {
+    rustTarget: 'aarch64-apple-darwin',
+    executable: 'aiohub-paddle-ocr',
+    manifestKey: 'darwin-arm64',
+    packageExecutable: 'aiohub-paddle-ocr-macos-arm64'
+  },
+  'linux-x64': {
+    rustTarget: 'x86_64-unknown-linux-gnu',
+    executable: 'aiohub-paddle-ocr',
+    manifestKey: 'linux-x64',
+    packageExecutable: 'aiohub-paddle-ocr-linux-x64'
+  },
+  'linux-arm64': {
+    rustTarget: 'aarch64-unknown-linux-gnu',
+    executable: 'aiohub-paddle-ocr',
+    manifestKey: 'linux-arm64',
+    packageExecutable: 'aiohub-paddle-ocr-linux-arm64'
   }
 };
 
@@ -165,7 +195,7 @@ function buildTarget(targetKey) {
   const target = TARGETS[targetKey];
   if (!target) {
     console.error(`不支持的目标平台: ${targetKey}`);
-    console.error(`当前首版支持: ${Object.keys(TARGETS).join(', ')}`);
+    console.error(`当前支持: ${Object.keys(TARGETS).join(', ')}`);
     process.exit(1);
   }
 
