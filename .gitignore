@@ -3,6 +3,7 @@
 /dist-ui/
 /node_modules/
 /bun.lockb
+/release-assets/
 *.zip
 *.log
 
