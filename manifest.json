@@ -39,6 +39,22 @@
       "returnType": "Promise<PaddleOcrBatchResult>"
     }
   ],
+  "contributions": [
+    {
+      "type": "ocr-engine",
+      "id": "ppocr-v5-mobile",
+      "name": "Paddle OCR",
+      "description": "基于 PP-OCRv5 Mobile 的本地离线 OCR 引擎",
+      "method": "recognizeBatch",
+      "modelProfiles": [
+        {
+          "id": "ppocr-v5-mobile",
+          "name": "PP-OCRv5 Mobile"
+        }
+      ],
+      "defaultModelProfile": "ppocr-v5-mobile"
+    }
+  ],
   "ui": {
     "displayName": "Paddle OCR",
     "component": "PaddleOcr.vue",

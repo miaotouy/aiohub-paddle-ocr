@@ -26,6 +26,13 @@ keys.txt
   - PaddleOCR 仓库中的 `ppocr/utils/dict/ppocrv5_dict.txt`
   - 放入插件目录时统一命名为 `keys.txt`
 
+## 语言能力
+
+当前插件不会根据 `language` 参数切换模型、字典或推理流程。首版语言能力由 `rec.mnn` 与 `keys.txt` 的实际来源决定：
+
+- 如果使用 `PP-OCRv5_mobile_rec` 搭配 `ppocrv5_dict.txt`，它是面向中英等常见混排场景的通用识别 profile。
+- 如果后续要支持日文、韩文、繁体或其他专用语言，应新增对应的模型 profile，并在插件 `manifest.json` 的 `contributions` 中声明独立的 `modelProfiles`，而不是只增加一个 UI 语言选项。
+
 如果优先追求准确率而不是包体和 CPU 性能，可以调研 server 模型：
 
 - https://www.modelscope.cn/models/PaddlePaddle/PP-OCRv5_server_det

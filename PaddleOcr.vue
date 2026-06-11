@@ -109,8 +109,7 @@ const callRecognizeBatch = async (images: unknown[]) => {
     params: {
       images,
       options: {
-        modelProfile,
-        language: 'ch'
+        modelProfile
       }
     }
   }) as PaddleOcrResult;

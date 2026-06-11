@@ -1,90 +1,47 @@
-# AIO Hub Paddle OCR 插件施工指南
+# AIO Hub Paddle OCR 插件
 
-本文档给并行进入 `plugins/aiohub-paddle-ocr` 的 Codex 使用。主应用侧计划见：
+AIO Hub Paddle OCR 是面向 AIO Hub Smart OCR 的本地离线 OCR sidecar 插件。插件通过独立进程加载 PaddleOCR MNN 模型，并向主应用暴露统一的批量识别方法，用于在 Smart OCR 中处理图片块、截图块和其他图像输入。
 
-```txt
-E:\rc20\allinweb\all-in-one-tools\src\tools\smart-ocr\docs\Plan\paddle-ocr-pluginization-research.md
-```
+首版插件聚焦 Windows x64、本地 ZIP 导入和离线模型推理，不依赖插件市场在线安装，也不会在首次使用时联网下载模型。
 
-## 0. 当前仓库状态
+## 项目状态
 
-已完成首版插件仓库初始化：
-
-- 独立 Git 仓库已初始化。
-- 已创建 `manifest.json`、`package.json`、`vite.config.js`、`build.js`、`PaddleOcr.vue`。
-- 已创建 Rust sidecar，支持 stdin 单行 JSON、stdout JSON Lines、`recognizeBatch` 分发、模型文件校验、data URL base64 解码和批量结果结构。
-- 已创建 `models/ppocr-v5-mobile/` 占位说明。
-- `bun run build` 可通过。
-- `bun run package` 会在真实模型缺失时中止并输出缺失文件列表。
-
-尚未完成：
-
-- 真实 Paddle OCR / MNN / `ocr-rs` 推理接入。
-- 真实模型文件 `det.mnn`、`rec.mnn`、`keys.txt` 放置与校验 hash。
-- 有模型后的 OCR benchmark 与 ZIP 验收。
-
-模型下载与转换说明见：
-
-```txt
-models/ppocr-v5-mobile/README.md
-```
-
-## 1. 目标
-
-实现官方 Paddle OCR sidecar 插件，让 Smart OCR 可以通过统一插件执行器调用：
-
-```ts
-execute({
-  service: "paddle-ocr",
-  method: "recognizeBatch",
-  params,
-});
-```
-
-首版目标：
-
+- 版本：`0.1.0`
 - 插件 ID：`paddle-ocr`
-- 插件目录：`plugins/aiohub-paddle-ocr`
 - 插件类型：`sidecar`
 - 首个方法：`recognizeBatch`
 - 首个模型：`ppocr-v5-mobile`
+- Smart OCR 扩展：通过 `manifest.json` 的 `contributions[]` 声明 `type: "ocr-engine"`
 - 首个平台：Windows x64
 - 分发方式：手动 ZIP 导入
 
-首版不要做：
+当前仓库已包含 Vue 管理页、Rust sidecar、构建脚本、模型目录约定和 Windows x64 打包流程。模型文件需要放置在 `models/ppocr-v5-mobile/` 目录中，发布 ZIP 会随包分发模型。
 
-- 不要改主应用 Smart OCR 代码。
-- 不要做 native 动态库插件。
-- 不要依赖插件市场在线安装。
-- 不要首次使用时联网下载模型。
-- 不要把模型或推理库塞进主应用。
+## 功能范围
 
-## 2. 与主应用的边界
+插件侧负责：
 
-插件仓库负责：
+- `manifest.json` 插件声明。
+- Rust sidecar 可执行文件。
+- PaddleOCR / `ocr-rs` / MNN 推理接入。
+- 模型文件定位、存在性检查、空文件检查和基础格式检查。
+- `recognizeBatch` 批量 OCR 方法。
+- 插件管理 UI `PaddleOcr.vue`。
+- Windows x64 ZIP 打包。
+- OCR 质量和性能验收记录。
 
-- `manifest.json`
-- Rust sidecar 可执行文件
-- Paddle OCR / `ocr-rs` / MNN 接入
-- 模型文件定位与完整性检查
-- `recognizeBatch` 方法
-- 插件管理 UI `PaddleOcr.vue`
-- Windows x64 ZIP 打包
-- OCR 质量和性能 benchmark
+主应用侧负责：
 
-主应用仓库负责：
+- sidecar/native adapter 的设置读取和运行态同步。
+- 读取插件 `contributions`，把 `type: "ocr-engine"` 的能力注册到 Smart OCR 引擎列表。
+- Smart OCR 插件引擎入口和缺失提示。
+- 将 Smart OCR blocks 批量传入 `paddle-ocr.recognizeBatch`。
 
-- 修复 sidecar/native adapter 的 settings await。
-- 修复 sidecar/native adapter 的运行态同步。
-- Smart OCR 新增 `plugin` 引擎。
-- ControlPanel 新增插件引擎入口和缺失提示。
-- 将 Smart OCR blocks 批量传给 `paddle-ocr.recognizeBatch`。
+插件仓库不直接修改主应用文件。需要主应用配合的事项应记录在 README、issue 或对应主应用计划文档中。
 
-插件侧不要跨边界修改主应用文件；需要主应用支持的事项记录到 README 或 issue。
+## 目录结构
 
-## 3. 建议目录结构
-
-开发态：
+开发态目录：
 
 ```txt
 plugins/aiohub-paddle-ocr/
@@ -99,11 +56,12 @@ plugins/aiohub-paddle-ocr/
 │   └── ppocr-v5-mobile/
 │       ├── det.mnn
 │       ├── rec.mnn
-│       └── keys.txt
+│       ├── keys.txt
+│       └── README.md
 └── README.md
 ```
 
-生产 ZIP：
+发布 ZIP 目录：
 
 ```txt
 paddle-ocr-v0.1.0-windows-x64.zip
@@ -120,73 +78,34 @@ paddle-ocr-v0.1.0-windows-x64.zip
 └── README.md
 ```
 
-可参考同目录下的 `plugins/example-file-hasher`，但这个插件是 OCR 重型推理场景，必须坚持批量调用。
+## 模型文件
 
-## 4. manifest.json 要求
+首版模型目录为：
 
-首版 manifest 可从下面开始：
-
-```json
-{
-  "id": "paddle-ocr",
-  "name": "Paddle OCR",
-  "version": "0.1.0",
-  "description": "基于 PaddleOCR 的本地离线 OCR 插件",
-  "author": "AIO Hub Team",
-  "icon": "🔎",
-  "tags": ["OCR", "PaddleOCR", "本地模型"],
-  "host": {
-    "appVersion": ">=0.6.3-alpha.5",
-    "apiVersion": 2
-  },
-  "type": "sidecar",
-  "sidecar": {
-    "executable": {
-      "win32-x64": "bin/aiohub-paddle-ocr-windows-x64.exe"
-    },
-    "args": []
-  },
-  "methods": [
-    {
-      "name": "recognizeBatch",
-      "displayName": "批量 OCR 识别",
-      "description": "使用本地 PaddleOCR 模型批量识别图片块中的文字",
-      "parameters": [
-        {
-          "name": "images",
-          "type": "array",
-          "required": true,
-          "description": "待识别图片块列表"
-        },
-        {
-          "name": "options",
-          "type": "object",
-          "required": false,
-          "description": "模型、语言和识别参数"
-        }
-      ],
-      "returnType": "Promise<PaddleOcrBatchResult>"
-    }
-  ],
-  "ui": {
-    "displayName": "Paddle OCR",
-    "component": "PaddleOcr.js",
-    "icon": "🔎"
-  }
-}
+```txt
+models/ppocr-v5-mobile/
 ```
 
-后续补齐其他平台键：
+必需文件：
 
-- `win32-arm64`
-- `darwin-x64`
-- `darwin-arm64`
-- `linux-x64`
-- `linux-arm64`
+```txt
+det.mnn
+rec.mnn
+keys.txt
+```
 
-## 5. Sidecar 输入输出协议
+`det.mnn` 和 `rec.mnn` 必须是真正的 MNN 模型文件，不能把 Hugging Face 或 ModelScope 上的 safetensors 权重直接改名为 `.mnn`。模型下载、转换和命名说明见 [models/ppocr-v5-mobile/README.md](models/ppocr-v5-mobile/README.md)。
 
-主应用每次调用会启动 sidecar，并向 stdin 写入一行 JSON：
+sidecar 启动时会检查：
+
+- 模型目录是否存在。
+- 必需模型文件是否存在。
+- 模型文件是否为空。
+- `.mnn` 文件是否疑似 safetensors 权重误改名。
+
+## 调用协议
+
+主应用每次执行插件方法时，会启动 sidecar 并向 stdin 写入一行 JSON：
 
 ```ts
 interface SidecarInput {
@@ -196,40 +115,43 @@ interface SidecarInput {
 }
 ```
 
-插件需要：
+sidecar 从 stdin 读取完整一行，解析 JSON，按 `method` 分发，完成 OCR 后通过 stdout 输出 JSON Lines。
 
-1. 从 stdin 读取完整一行。
-2. 解析 JSON。
-3. 根据 `method` 分发。
-4. 完成 OCR。
-5. 向 stdout 输出 JSON Lines。
-
-成功结果必须输出一行：
+成功结果：
 
 ```json
 { "type": "result", "data": { "results": [] } }
 ```
 
-进度可输出：
+进度事件：
 
 ```json
-{ "type": "progress", "data": { "message": "正在加载模型", "percent": 10 } }
+{ "type": "progress", "data": { "message": "正在加载模型", "percent": 20 } }
 ```
 
-错误可输出：
+错误事件：
 
 ```json
 { "type": "error", "data": "模型文件缺失: models/ppocr-v5-mobile/det.mnn" }
 ```
 
-注意：
+约定：
 
-- 正常日志不要写 stderr；当前主应用会把 stderr 每一行当作 error 事件。
-- 正常调试日志可以写 stdout 非 JSON 行，主应用会当作 log 事件。
-- 最终只应输出一条 `type: "result"` 作为成功结果。
+- 正常日志不要写入 stderr，主应用会把 stderr 每一行视为 error 事件。
+- 成功调用最终只输出一条 `type: "result"`。
 - 非零退出码会被主应用视为执行失败。
 
-## 6. recognizeBatch 方法契约
+## recognizeBatch
+
+调用方式：
+
+```ts
+execute({
+  service: "paddle-ocr",
+  method: "recognizeBatch",
+  params,
+});
+```
 
 输入：
 
@@ -244,7 +166,6 @@ interface PaddleOcrBatchRequest {
   }>;
   options?: {
     modelProfile?: "ppocr-v5-mobile";
-    language?: "ch" | "en";
     detLimitSideLen?: number;
     detThresh?: number;
     boxThresh?: number;
@@ -252,6 +173,8 @@ interface PaddleOcrBatchRequest {
   };
 }
 ```
+
+语言能力由当前 `modelProfile` 对应的识别模型和 `keys.txt` 字典决定。首版 `ppocr-v5-mobile` 不把 `language` 暴露为 Smart OCR 配置项，因为 sidecar 当前不会根据语言切换模型或字典；后续接入多语言专用模型时，应新增模型 profile 或让对应 profile 显式声明语言能力。
 
 输出：
 
@@ -276,83 +199,42 @@ interface PaddleOcrBatchResult {
 结果要求：
 
 - `results.length` 尽量与输入 `images.length` 一致。
-- 单张图片失败时返回该图片的 `{ status: "error", error }`，不要让整个批次直接失败。
-- 只有模型缺失、输入无法解析、方法不存在等全局错误才让整个调用失败。
-- 返回顺序建议与输入顺序一致。
+- 返回顺序与输入顺序保持一致。
+- 单张图片失败时返回该图片的 `{ status: "error", error }`，不让整个批次直接失败。
+- 模型缺失、输入无法解析、方法不存在等全局错误才让整个调用失败。
 
-## 7. 模型路径
+## 管理页
 
-sidecar 进程的工作目录当前是插件根目录，因此模型路径可以按相对路径定位：
+`PaddleOcr.vue` 是插件管理页，不耦合 Smart OCR 主识别流程。当前管理页提供：
 
-```txt
-models/ppocr-v5-mobile/det.mnn
-models/ppocr-v5-mobile/rec.mnn
-models/ppocr-v5-mobile/keys.txt
-```
+- 插件版本展示。
+- 当前模型 profile 展示。
+- 后端调用状态检查。
+- 模型文件状态检查。
+- 单图 smoke test。
+- 最近一次调用耗时、图片数量和结果预览。
 
-启动时应检查：
+正式 OCR 识别流程统一走 `recognizeBatch`。
 
-- 模型目录存在。
-- 必需文件存在。
-- 文件大小不为 0。
-- 读取失败时返回清晰错误。
+## 构建与打包
 
-首版模型随 ZIP 分发。不要在首版实现联网下载模型。
+包管理器使用 Bun。运行脚本前可先查看 `package.json` 中的脚本定义。
 
-## 8. Rust sidecar 建议
-
-建议先做最小闭环：
-
-1. 读取 stdin。
-2. 解析 `SidecarInput`。
-3. 校验 `method === "recognizeBatch"`。
-4. 校验模型文件存在。
-5. 解码 data URL/base64。
-6. 单图 OCR。
-7. 批量循环，逐张收集结果。
-8. 输出 `type: "result"`。
-
-data URL 解码注意：
-
-- 输入可能是 `data:image/png;base64,...`。
-- 不要把 data URL 当 URL 去 fetch。
-- sidecar 里直接截取逗号后的 base64 部分解码。
-
-日志建议：
-
-- 用 stdout 输出进度 JSON。
-- 普通 debug 可先输出 stdout 非 JSON 行。
-- stderr 只用于真正需要主应用判错的致命错误。
-
-## 9. 插件 UI 首版
-
-`PaddleOcr.vue` 首版只需要管理页能力，不要耦合 Smart OCR 主流程。
-
-建议显示：
-
-- 插件版本。
-- 当前后端可执行文件状态。
-- 当前模型 profile。
-- 模型文件完整性。
-- 简单单图测试入口。
-- 最近一次识别耗时和图片数量。
-
-UI 不负责 Smart OCR 的正式识别流程。正式识别走 `recognizeBatch`。
-
-## 10. 打包与验证
-
-包管理器使用 Bun。运行脚本前先读取当前 `package.json`。
-
-建议脚本：
+开发构建：
 
 ```txt
 bun run build
+```
+
+发布打包：
+
+```txt
 bun run package
 ```
 
-具体以插件仓库实际 `package.json` 为准。
+`bun run build` 会构建 Vue 管理页和 Rust sidecar。`bun run package` 会额外校验必需模型文件，复制发布产物，并生成 Windows x64 ZIP。
 
-Windows x64 首版验收：
+## 验收清单
 
 - ZIP 能通过主应用插件导入预检。
 - 插件能安装到 app data 插件目录。
@@ -364,7 +246,7 @@ Windows x64 首版验收：
 - 多 block 批量任务只启动一次 sidecar 调用。
 - 模型缺失时错误清晰。
 
-Benchmark 记录：
+Benchmark 建议记录：
 
 - 测试样本名称。
 - 图片数量。
@@ -376,16 +258,35 @@ Benchmark 记录：
 - 失败图片数。
 - ZIP 大小。
 
-## 11. 后续路线
+## 路线图
 
-POC 稳定后再做：
+已完成或已进入首版实现的计划项：
 
-- 文件路径输入，减少 base64/stdin 压力。
-- 更多模型 profile。
-- 模型完整性 hash 校验。
-- 多平台二进制。
+- ~~初始化独立插件仓库。~~
+- ~~创建 `manifest.json`、`package.json`、`vite.config.js` 和 `build.js`。~~
+- ~~创建 `PaddleOcr.vue` 插件管理页。~~
+- ~~创建 Rust sidecar。~~
+- ~~实现 stdin 单行 JSON 输入和 stdout JSON Lines 输出。~~
+- ~~实现 `recognizeBatch` 方法分发。~~
+- ~~实现模型文件存在性、空文件和 safetensors 误用校验。~~
+- ~~实现 data URL base64 解码。~~
+- ~~实现批量结果结构，单图失败不影响整个批次。~~
+- ~~接入 `ocr-rs` / MNN 推理后端。~~
+- ~~放置 `det.mnn`、`rec.mnn` 和 `keys.txt` 模型文件。~~
+- ~~放置 `ppocr-v5-mobile` 模型目录说明。~~
+- ~~支持 Windows x64 构建。~~
+- ~~发布打包时复制 sidecar、管理页、manifest、README 和模型文件。~~
+
+待完成或后续优化：
+
+- 补齐正式 OCR benchmark 与验收记录。
+- 增加模型完整性 hash 校验。
+- 支持文件路径输入，减少 base64/stdin 压力。
+- 增加更多模型 profile。
+- 支持多语言识别模型的显式选择。
+- 增加 `win32-arm64`、`darwin-x64`、`darwin-arm64`、`linux-x64`、`linux-arm64` 平台产物。
 - 按平台拆分 ZIP。
-- 插件市场元数据。
-- 常驻 sidecar daemon。
+- 补充插件市场元数据。
+- 评估常驻 sidecar daemon。
 
-native 插件只作为后续性能优化备选，不作为首版方向。
+native 插件仅作为后续性能优化备选，不作为首版方向。
