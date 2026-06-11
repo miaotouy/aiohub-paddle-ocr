@@ -1,13 +1,13 @@
 {
   "id": "paddle-ocr",
   "name": "Paddle OCR",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "基于 PaddleOCR 的本地离线 OCR 插件",
   "author": "AIO Hub Team",
   "icon": "🔎",
   "tags": ["OCR", "PaddleOCR", "本地模型"],
   "host": {
-    "appVersion": ">=0.6.3-alpha.5",
+    "appVersion": ">=0.6.3-alpha.6",
     "apiVersion": 2
   },
   "type": "sidecar",

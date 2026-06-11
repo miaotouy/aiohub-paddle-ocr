@@ -1,6 +1,6 @@
 {
   "name": "aiohub-paddle-ocr-plugin",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AIO Hub Paddle OCR sidecar 插件",
   "type": "module",
   "scripts": {
