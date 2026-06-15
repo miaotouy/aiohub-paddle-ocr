@@ -549,15 +549,17 @@ fn recognize_single_image(engine: &PaddleOcrEngine, image: &OcrImageInput) -> Pa
                 lines: Some(lines),
             }
         }
-        Err(error) => PaddleOcrImageResult {
-            block_id: image.block_id.clone(),
-            image_id: image.image_id.clone(),
-            text: String::new(),
-            confidence: None,
-            status: OcrStatus::Error,
-            error: Some(error.to_string()),
-            lines: None,
-        },
+        Err(error) => {
+            PaddleOcrImageResult {
+                block_id: image.block_id.clone(),
+                image_id: image.image_id.clone(),
+                text: String::new(),
+                confidence: None,
+                status: OcrStatus::Error,
+                error: Some(error.to_string()),
+                lines: None,
+            }
+        }
     }
 }
 

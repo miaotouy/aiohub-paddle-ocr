@@ -103,7 +103,12 @@
           "language": "th"
         }
       ],
-      "defaultModelProfile": "ppocr-v5-mobile-general"
+      "defaultModelProfile": "ppocr-v5-mobile-general",
+      "capabilities": {
+        "batch": true,
+        "confidence": true,
+        "preferredImageMimeTypes": ["image/png", "image/jpeg", "image/webp"]
+      }
     }
   ],
   "ui": {

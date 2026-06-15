@@ -73,7 +73,7 @@ interface PaddleOcrResult {
   }>;
 }
 
-const version = '0.1.0';
+const version = '0.3.0';
 const defaultModelProfile = 'ppocr-v5-mobile-general';
 const modelProfiles = [
   { id: 'ppocr-v5-mobile-general', name: '通用', language: 'general' },
