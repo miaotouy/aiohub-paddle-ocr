@@ -7,7 +7,7 @@
   "icon": "🔎",
   "tags": ["OCR", "PaddleOCR", "本地模型"],
   "host": {
-    "appVersion": ">=0.6.3-alpha.6",
+    "appVersion": ">=0.6.4",
     "apiVersion": 2
   },
   "type": "sidecar",
