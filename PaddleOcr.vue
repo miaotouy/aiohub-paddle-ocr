@@ -61,6 +61,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { customMessage, execute } from 'aiohub-sdk';
+import manifest from './manifest.json';
 
 interface PaddleOcrResult {
   results?: Array<{
@@ -73,7 +74,7 @@ interface PaddleOcrResult {
   }>;
 }
 
-const version = '0.3.0';
+const version = manifest.version;
 const defaultModelProfile = 'ppocr-v5-mobile-general';
 const modelProfiles = [
   { id: 'ppocr-v5-mobile-general', name: '通用', language: 'general' },
