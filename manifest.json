@@ -12,10 +12,13 @@
   },
   "type": "sidecar",
   "sidecar": {
+    "resident": true,
     "executable": {
       "win32-x64": "target/x86_64-pc-windows-msvc/debug/aiohub-paddle-ocr.exe"
     },
-    "args": []
+    "args": [],
+    "startupMethod": "recognizeBatch",
+    "startupParams": {}
   },
   "methods": [
     {
@@ -117,3 +120,4 @@
     "icon": "🔎"
   }
 }
+

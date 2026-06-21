@@ -21,13 +21,18 @@ const MODEL_ROOT: &str = "models";
 const MODEL_FAMILY_DIR: &str = "ppocr-v5-mobile";
 const DET_MODEL_FILE: &str = "ppocrv5_mobile_det.mnn";
 
+// ============================================================================
+// 输入协议 — 常驻 JSON-RPC 格式
+// ============================================================================
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct SidecarInput {
+struct ResidentInput {
+    /// JSON-RPC 请求 ID（可选，用于向后兼容）
+    #[serde(default)]
+    id: Option<u64>,
     method: String,
     params: serde_json::Value,
-    #[allow(dead_code)]
-    settings: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,11 +47,12 @@ struct RecognizeBatchRequest {
 struct OcrImageInput {
     block_id: String,
     image_id: String,
-    data_url: String,
-    #[allow(dead_code)]
-    width: Option<u32>,
-    #[allow(dead_code)]
-    height: Option<u32>,
+    /// 零拷贝：优先使用本地文件路径
+    #[serde(default)]
+    path: Option<String>,
+    /// 兼容现有调用：path 不存在时回退到 dataUrl
+    #[serde(default)]
+    data_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -64,6 +70,10 @@ struct OcrOptions {
     #[allow(dead_code)]
     unclip_ratio: Option<f32>,
 }
+
+// ============================================================================
+// 模型 Profile 定义
+// ============================================================================
 
 #[derive(Debug)]
 struct ModelProfile {
@@ -154,11 +164,21 @@ const MODEL_PROFILES: &[ModelProfile] = &[
     },
 ];
 
-#[derive(Debug)]
-struct ModelPaths {
-    det_path: PathBuf,
-    rec_path: PathBuf,
-    dict_path: PathBuf,
+// ============================================================================
+// 输出协议
+// ============================================================================
+
+/// 带 id 的输出事件，支持 JSON-RPC 匹配
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResidentOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<u64>,
+    #[serde(rename = "type")]
+    output_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event: Option<String>,
+    data: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -197,29 +217,113 @@ enum OcrStatus {
     Error,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProgressPayload {
-    message: String,
-    percent: u32,
+// ============================================================================
+// 模型路径与引擎
+// ============================================================================
+
+#[derive(Debug)]
+struct ModelPaths {
+    det_path: PathBuf,
+    rec_path: PathBuf,
+    dict_path: PathBuf,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SidecarEvent<T: Serialize> {
-    #[serde(rename = "type")]
-    event_type: &'static str,
-    data: T,
+struct PaddleOcrEngine {
+    engine: OcrEngine,
 }
+
+impl PaddleOcrEngine {
+    fn load(model_paths: &ModelPaths, options: Option<&OcrOptions>) -> Result<Self, SidecarError> {
+        let config = build_engine_config(options);
+        let engine = with_native_stdout_suppressed(|| {
+            OcrEngine::new(
+                model_paths.det_path.clone(),
+                model_paths.rec_path.clone(),
+                model_paths.dict_path.clone(),
+                Some(config),
+            )
+        })
+        .map_err(|error| SidecarError::EngineLoadFailed(error.to_string()))?;
+
+        Ok(Self { engine })
+    }
+
+    fn recognize(&self, image_bytes: &[u8]) -> Result<Vec<OcrLine>, ImageError> {
+        let image = image::load_from_memory(image_bytes)
+            .map_err(|error| ImageError::InvalidImage(error.to_string()))?;
+        let results = self
+            .engine
+            .recognize(&image)
+            .map_err(|error| ImageError::InferenceFailed(error.to_string()))?;
+
+        Ok(results
+            .into_iter()
+            .map(|result| OcrLine {
+                text: result.text,
+                score: result.confidence,
+                bbox: bbox_points(&result.bbox),
+            })
+            .collect())
+    }
+}
+
+// ============================================================================
+// 运行时状态：已加载引擎 + 当前 profile
+// ============================================================================
+
+struct EngineHolder {
+    current_profile_id: Option<String>,
+    engine: Option<PaddleOcrEngine>,
+}
+
+impl EngineHolder {
+    fn new() -> Self {
+        Self {
+            current_profile_id: None,
+            engine: None,
+        }
+    }
+
+    /// 获取或加载引擎。如果请求的 profile 与当前不同，则切换。
+    fn get_or_load(
+        &mut self,
+        profile: &'static ModelProfile,
+        options: Option<&OcrOptions>,
+    ) -> Result<&PaddleOcrEngine, SidecarError> {
+        let profile_id = profile.id.to_string();
+
+        if self.current_profile_id.as_deref() == Some(&profile_id) {
+            // 命中缓存
+            if let Some(ref engine) = self.engine {
+                return Ok(engine);
+            }
+        }
+
+        // 需要加载新模型
+        let model_paths = validate_model_files(profile)?;
+        send_event_with_id(
+            None,
+            "progress",
+            None,
+            serde_json::json!({ "message": format!("正在切换模型: {}", profile.id), "percent": 5 }),
+        );
+        let engine = PaddleOcrEngine::load(&model_paths, options)?;
+
+        self.current_profile_id = Some(profile_id);
+        self.engine = Some(engine);
+
+        Ok(self.engine.as_ref().unwrap())
+    }
+}
+
+// ============================================================================
+// 错误类型
+// ============================================================================
 
 #[derive(Debug, Error)]
 enum SidecarError {
-    #[error("未收到输入")]
-    MissingInput,
     #[error("解析输入失败: {0}")]
     InvalidInput(#[from] serde_json::Error),
-    #[error("未知方法: {0}")]
-    UnknownMethod(String),
     #[error("不支持的模型 profile: {0}")]
     UnsupportedModelProfile(String),
     #[error("不支持的 language: {0}")]
@@ -238,6 +342,8 @@ enum SidecarError {
 
 #[derive(Debug, Error)]
 enum ImageError {
+    #[error("图片数据不足")]
+    NoData,
     #[error("dataUrl 不是 base64 data URL")]
     InvalidDataUrl,
     #[error("图片 base64 解码失败: {0}")]
@@ -248,75 +354,221 @@ enum ImageError {
     InferenceFailed(String),
 }
 
+// ============================================================================
+// 主入口 — 常驻循环
+// ============================================================================
+
 fn main() {
-    if let Err(error) = run() {
-        send_error(&error.to_string());
-        process::exit(1);
-    }
-}
-
-fn run() -> Result<(), SidecarError> {
-    let input = read_single_line()?;
-    let input: SidecarInput = serde_json::from_str(&input)?;
-
-    match input.method.as_str() {
-        "recognizeBatch" => {
-            let request: RecognizeBatchRequest = serde_json::from_value(input.params)?;
-            recognize_batch(request)?;
-            Ok(())
-        }
-        method => Err(SidecarError::UnknownMethod(method.to_string())),
-    }
-}
-
-fn read_single_line() -> Result<String, SidecarError> {
     let stdin = io::stdin();
-    let mut lines = stdin.lock().lines();
-    let line = lines
-        .next()
-        .ok_or(SidecarError::MissingInput)?
-        .map_err(|_| SidecarError::MissingInput)?;
+    let mut engine_holder = EngineHolder::new();
 
-    if line.trim().is_empty() {
-        return Err(SidecarError::MissingInput);
+    for line_result in stdin.lock().lines() {
+        let line = match line_result {
+            Ok(line) => line,
+            Err(e) => {
+                send_event_with_id(
+                    None,
+                    "error",
+                    None,
+                    serde_json::json!(format!("读取 stdin 失败: {}", e)),
+                );
+                continue;
+            }
+        };
+
+        let trimmed = line.trim().to_string();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let input: ResidentInput = match serde_json::from_str(&trimmed) {
+            Ok(input) => input,
+            Err(e) => {
+                send_event_with_id(
+                    None,
+                    "error",
+                    None,
+                    serde_json::json!(format!("解析输入失败: {}", e)),
+                );
+                continue;
+            }
+        };
+
+        let id = input.id;
+
+        match input.method.as_str() {
+            "recognizeBatch" => {
+                let request: RecognizeBatchRequest = match serde_json::from_value(input.params) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        send_event_with_id(
+                            id,
+                            "error",
+                            None,
+                            serde_json::json!(format!("解析参数失败: {}", e)),
+                        );
+                        continue;
+                    }
+                };
+
+                match handle_recognize_batch(&mut engine_holder, request) {
+                    Ok(result) => {
+                        send_event_with_id(
+                            id,
+                            "result",
+                            None,
+                            serde_json::to_value(result).unwrap_or_default(),
+                        );
+                    }
+                    Err(e) => {
+                        send_event_with_id(id, "error", None, serde_json::json!(e.to_string()));
+                    }
+                }
+            }
+            "shutdown" => {
+                send_event_with_id(id, "result", None, serde_json::json!("shutdown"));
+                process::exit(0);
+            }
+            method => {
+                send_event_with_id(
+                    id,
+                    "error",
+                    None,
+                    serde_json::json!(format!("未知方法: {}", method)),
+                );
+            }
+        }
     }
-
-    Ok(line)
 }
 
-fn recognize_batch(request: RecognizeBatchRequest) -> Result<(), SidecarError> {
+// ============================================================================
+// recognizeBatch 处理
+// ============================================================================
+
+fn handle_recognize_batch(
+    engine_holder: &mut EngineHolder,
+    request: RecognizeBatchRequest,
+) -> Result<PaddleOcrBatchResult, SidecarError> {
     let started_at = Instant::now();
     let model_profile = resolve_model_profile(request.options.as_ref())?;
 
-    send_progress(5, "正在检查模型文件");
-    let model_paths = validate_model_files(model_profile)?;
-
-    send_progress(20, "正在加载 OCR 后端");
-    let engine = PaddleOcrEngine::load(&model_paths, request.options.as_ref())?;
+    // 获取/加载引擎（自动处理动态切换）
+    let engine = engine_holder.get_or_load(model_profile, request.options.as_ref())?;
 
     let total = request.images.len();
     let mut results = Vec::with_capacity(total);
 
     for (index, image) in request.images.iter().enumerate() {
         let percent = batch_percent(index, total);
-        send_progress(percent, &format!("正在识别 {}/{}", index + 1, total));
-        results.push(recognize_single_image(&engine, image));
+        send_event_with_id(
+            None,
+            "progress",
+            None,
+            serde_json::json!({ "message": format!("正在识别 {}/{}", index + 1, total), "percent": percent }),
+        );
+        results.push(recognize_single_image(engine, image));
     }
 
     let elapsed_ms = started_at.elapsed().as_millis();
-    send_progress(100, &format!("批量识别完成，耗时 {} ms", elapsed_ms));
-    send_result(PaddleOcrBatchResult { results });
-    Ok(())
+    send_event_with_id(
+        None,
+        "progress",
+        None,
+        serde_json::json!({ "message": format!("批量识别完成，耗时 {} ms", elapsed_ms), "percent": 100 }),
+    );
+
+    Ok(PaddleOcrBatchResult { results })
 }
 
 fn batch_percent(index: usize, total: usize) -> u32 {
     if total == 0 {
         return 90;
     }
-
     let ratio = index as f32 / total as f32;
     20 + (ratio * 75.0).round() as u32
 }
+
+// ============================================================================
+// 单图识别（支持 path 零拷贝）
+// ============================================================================
+
+fn recognize_single_image(engine: &PaddleOcrEngine, image: &OcrImageInput) -> PaddleOcrImageResult {
+    let image_bytes = match read_image_bytes(image) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            return PaddleOcrImageResult {
+                block_id: image.block_id.clone(),
+                image_id: image.image_id.clone(),
+                text: String::new(),
+                confidence: None,
+                status: OcrStatus::Error,
+                error: Some(e.to_string()),
+                lines: None,
+            };
+        }
+    };
+
+    match engine.recognize(&image_bytes) {
+        Ok(lines) => {
+            let text = lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
+            let confidence = average_confidence(&lines);
+
+            PaddleOcrImageResult {
+                block_id: image.block_id.clone(),
+                image_id: image.image_id.clone(),
+                text,
+                confidence,
+                status: OcrStatus::Success,
+                error: None,
+                lines: Some(lines),
+            }
+        }
+        Err(error) => PaddleOcrImageResult {
+            block_id: image.block_id.clone(),
+            image_id: image.image_id.clone(),
+            text: String::new(),
+            confidence: None,
+            status: OcrStatus::Error,
+            error: Some(error.to_string()),
+            lines: None,
+        },
+    }
+}
+
+/// 读取图片字节：优先使用 path 零拷贝，回退到 dataUrl 解码
+fn read_image_bytes(image: &OcrImageInput) -> Result<Vec<u8>, ImageError> {
+    if let Some(ref path) = image.path {
+        fs::read(path)
+            .map_err(|e| ImageError::InvalidImage(format!("读取文件失败 {}: {}", path, e)))
+    } else if let Some(ref data_url) = image.data_url {
+        decode_data_url(data_url)
+    } else {
+        Err(ImageError::NoData)
+    }
+}
+
+fn decode_data_url(data_url: &str) -> Result<Vec<u8>, ImageError> {
+    let (_, encoded) = data_url.split_once(',').ok_or(ImageError::InvalidDataUrl)?;
+    STANDARD
+        .decode(encoded)
+        .map_err(|error| ImageError::InvalidBase64(error.to_string()))
+}
+
+fn average_confidence(lines: &[OcrLine]) -> Option<f32> {
+    if lines.is_empty() {
+        return None;
+    }
+    let total: f32 = lines.iter().map(|line| line.score).sum();
+    Some(total / lines.len() as f32)
+}
+
+// ============================================================================
+// Model Profile 解析
+// ============================================================================
 
 fn resolve_model_profile(
     options: Option<&OcrOptions>,
@@ -362,6 +614,10 @@ fn find_language_profile(language: &str) -> Option<&'static ModelProfile> {
                 .any(|alias| alias.eq_ignore_ascii_case(language))
     })
 }
+
+// ============================================================================
+// 模型文件校验
+// ============================================================================
 
 fn validate_model_files(model_profile: &ModelProfile) -> Result<ModelPaths, SidecarError> {
     let model_dir = Path::new(MODEL_ROOT).join(MODEL_FAMILY_DIR);
@@ -428,6 +684,10 @@ fn looks_like_safetensors(file_path: &Path) -> bool {
     read_len >= 16 && header[8] == b'{' && header[9..read_len].windows(7).any(|w| w == b"\"dtype\"")
 }
 
+// ============================================================================
+// Native stdout 抑制（OCR 后端可能会污染 stdout）
+// ============================================================================
+
 fn with_native_stdout_suppressed<T>(operation: impl FnOnce() -> T) -> T {
     let _silencer = NativeStdoutSilencer::new();
     operation()
@@ -440,8 +700,6 @@ struct NativeStdoutSilencer {
 
 impl NativeStdoutSilencer {
     fn new() -> Option<Self> {
-        // Some native OCR backends print capability probes to C stdout. Keep the
-        // sidecar protocol clean by redirecting fd 1 only while the backend loads.
         unsafe {
             let saved_fd = dup_fd(1);
             if saved_fd < 0 {
@@ -529,95 +787,9 @@ unsafe fn close_fd(fd: i32) -> i32 {
     libc::close(fd)
 }
 
-fn recognize_single_image(engine: &PaddleOcrEngine, image: &OcrImageInput) -> PaddleOcrImageResult {
-    match decode_data_url(&image.data_url).and_then(|bytes| engine.recognize(&bytes)) {
-        Ok(lines) => {
-            let text = lines
-                .iter()
-                .map(|line| line.text.as_str())
-                .collect::<Vec<_>>()
-                .join("\n");
-            let confidence = average_confidence(&lines);
-
-            PaddleOcrImageResult {
-                block_id: image.block_id.clone(),
-                image_id: image.image_id.clone(),
-                text,
-                confidence,
-                status: OcrStatus::Success,
-                error: None,
-                lines: Some(lines),
-            }
-        }
-        Err(error) => {
-            PaddleOcrImageResult {
-                block_id: image.block_id.clone(),
-                image_id: image.image_id.clone(),
-                text: String::new(),
-                confidence: None,
-                status: OcrStatus::Error,
-                error: Some(error.to_string()),
-                lines: None,
-            }
-        }
-    }
-}
-
-fn decode_data_url(data_url: &str) -> Result<Vec<u8>, ImageError> {
-    let (_, encoded) = data_url.split_once(',').ok_or(ImageError::InvalidDataUrl)?;
-
-    STANDARD
-        .decode(encoded)
-        .map_err(|error| ImageError::InvalidBase64(error.to_string()))
-}
-
-fn average_confidence(lines: &[OcrLine]) -> Option<f32> {
-    if lines.is_empty() {
-        return None;
-    }
-
-    let total: f32 = lines.iter().map(|line| line.score).sum();
-    Some(total / lines.len() as f32)
-}
-
-struct PaddleOcrEngine {
-    engine: OcrEngine,
-}
-
-impl PaddleOcrEngine {
-    fn load(model_paths: &ModelPaths, options: Option<&OcrOptions>) -> Result<Self, SidecarError> {
-        let config = build_engine_config(options);
-        let engine = with_native_stdout_suppressed(|| {
-            OcrEngine::new(
-                model_paths.det_path.clone(),
-                model_paths.rec_path.clone(),
-                model_paths.dict_path.clone(),
-                Some(config),
-            )
-        })
-        .map_err(|error| SidecarError::EngineLoadFailed(error.to_string()))?;
-
-        Ok(Self { engine })
-    }
-
-    fn recognize(&self, image_bytes: &[u8]) -> Result<Vec<OcrLine>, ImageError> {
-        let image = image::load_from_memory(image_bytes)
-            .map_err(|error| ImageError::InvalidImage(error.to_string()))?;
-        let results = self
-            .engine
-            .recognize(&image)
-            .map_err(|error| ImageError::InferenceFailed(error.to_string()))?;
-
-        Ok(results
-            .into_iter()
-            .map(|result| OcrLine {
-                text: result.text,
-                score: result.confidence,
-                bbox: bbox_points(&result.bbox),
-            })
-            .collect())
-    }
-}
+// ============================================================================
+// Engine 配置构建
+// ============================================================================
 
 fn build_engine_config(options: Option<&OcrOptions>) -> OcrEngineConfig {
     let mut det_options = DetOptions::default();
@@ -656,33 +828,24 @@ fn bbox_points(text_box: &ocr_rs::TextBox) -> Vec<[f32; 2]> {
     vec![[left, top], [right, top], [right, bottom], [left, bottom]]
 }
 
-fn send_progress(percent: u32, message: &str) {
-    send_event(SidecarEvent {
-        event_type: "progress",
-        data: ProgressPayload {
-            message: message.to_string(),
-            percent,
-        },
-    });
-}
+// ============================================================================
+// 事件发送
+// ============================================================================
 
-fn send_result(data: PaddleOcrBatchResult) {
-    send_event(SidecarEvent {
-        event_type: "result",
+fn send_event_with_id(
+    id: Option<u64>,
+    output_type: &str,
+    event: Option<&str>,
+    data: serde_json::Value,
+) {
+    let output = ResidentOutput {
+        id,
+        output_type: output_type.to_string(),
+        event: event.map(|s| s.to_string()),
         data,
-    });
-}
-
-fn send_error(message: &str) {
-    send_event(SidecarEvent {
-        event_type: "error",
-        data: message.to_string(),
-    });
-}
-
-fn send_event<T: Serialize>(event: SidecarEvent<T>) {
-    match serde_json::to_string(&event) {
+    };
+    match serde_json::to_string(&output) {
         Ok(line) => println!("{}", line),
-        Err(_) => println!(r#"{{"type":"error","data":"序列化 sidecar 输出失败"}}"#),
+        Err(_) => eprintln!("序列化输出失败"),
     }
 }
