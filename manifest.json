@@ -18,7 +18,9 @@
     },
     "args": [],
     "startupMethod": "recognizeBatch",
-    "startupParams": {}
+    "startupParams": {
+      "images": []
+    }
   },
   "methods": [
     {

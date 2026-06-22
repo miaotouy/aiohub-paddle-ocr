@@ -1,12 +1,14 @@
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use ocr_rs::{DetOptions, OcrEngine, OcrEngineConfig};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::ptr;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use thiserror::Error;
 
@@ -38,6 +40,7 @@ struct ResidentInput {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RecognizeBatchRequest {
+    #[serde(default)]
     images: Vec<OcrImageInput>,
     options: Option<OcrOptions>,
 }
@@ -228,8 +231,9 @@ struct ModelPaths {
     dict_path: PathBuf,
 }
 
+/// PaddleOcrEngine 包装 ocr_rs 引擎，通过内部 Mutex 保证 Send + Sync
 struct PaddleOcrEngine {
-    engine: OcrEngine,
+    engine: Mutex<OcrEngine>,
 }
 
 impl PaddleOcrEngine {
@@ -245,14 +249,16 @@ impl PaddleOcrEngine {
         })
         .map_err(|error| SidecarError::EngineLoadFailed(error.to_string()))?;
 
-        Ok(Self { engine })
+        Ok(Self {
+            engine: Mutex::new(engine),
+        })
     }
 
     fn recognize(&self, image_bytes: &[u8]) -> Result<Vec<OcrLine>, ImageError> {
         let image = image::load_from_memory(image_bytes)
             .map_err(|error| ImageError::InvalidImage(error.to_string()))?;
-        let results = self
-            .engine
+        let engine = self.engine.lock().expect("OCR 引擎锁被异常持有");
+        let results = engine
             .recognize(&image)
             .map_err(|error| ImageError::InferenceFailed(error.to_string()))?;
 
@@ -273,7 +279,7 @@ impl PaddleOcrEngine {
 
 struct EngineHolder {
     current_profile_id: Option<String>,
-    engine: Option<PaddleOcrEngine>,
+    engine: Option<Arc<PaddleOcrEngine>>,
 }
 
 impl EngineHolder {
@@ -285,17 +291,18 @@ impl EngineHolder {
     }
 
     /// 获取或加载引擎。如果请求的 profile 与当前不同，则切换。
+    /// 返回 Arc 以便在并行场景中克隆共享。
     fn get_or_load(
         &mut self,
         profile: &'static ModelProfile,
         options: Option<&OcrOptions>,
-    ) -> Result<&PaddleOcrEngine, SidecarError> {
+    ) -> Result<Arc<PaddleOcrEngine>, SidecarError> {
         let profile_id = profile.id.to_string();
 
         if self.current_profile_id.as_deref() == Some(&profile_id) {
             // 命中缓存
             if let Some(ref engine) = self.engine {
-                return Ok(engine);
+                return Ok(Arc::clone(engine));
             }
         }
 
@@ -310,9 +317,9 @@ impl EngineHolder {
         let engine = PaddleOcrEngine::load(&model_paths, options)?;
 
         self.current_profile_id = Some(profile_id);
-        self.engine = Some(engine);
+        self.engine = Some(Arc::new(engine));
 
-        Ok(self.engine.as_ref().unwrap())
+        Ok(Arc::clone(self.engine.as_ref().unwrap()))
     }
 }
 
@@ -451,24 +458,30 @@ fn handle_recognize_batch(
 ) -> Result<PaddleOcrBatchResult, SidecarError> {
     let started_at = Instant::now();
     let model_profile = resolve_model_profile(request.options.as_ref())?;
-
-    // 获取/加载引擎（自动处理动态切换）
+    // 获取/加载引擎（自动处理动态切换），返回 Arc 便于跨线程共享
     let engine = engine_holder.get_or_load(model_profile, request.options.as_ref())?;
 
     let total = request.images.len();
-    let mut results = Vec::with_capacity(total);
 
-    for (index, image) in request.images.iter().enumerate() {
-        let percent = batch_percent(index, total);
-        send_event_with_id(
-            None,
-            "progress",
-            None,
-            serde_json::json!({ "message": format!("正在识别 {}/{}", index + 1, total), "percent": percent }),
-        );
-        results.push(recognize_single_image(engine, image));
-    }
+    send_event_with_id(
+        None,
+        "progress",
+        None,
+        serde_json::json!({ "message": format!("开始并行识别 {} 个图片块", total), "percent": 5 }),
+    );
 
+    // 并行策略：
+    // 1. par_iter 并行读取图片字节（I/O 与 Base64 解码是 CPU/IO 密集，并行收益大）
+    // 2. 推理阶段通过 Mutex 保护引擎（ocr_rs 可能非线程安全）
+    let results: Vec<PaddleOcrImageResult> = request
+        .images
+        .par_iter()
+        .map(|image| {
+            // 并行执行：I/O（读文件/Base64解码）+ 推理
+            // PaddleOcrEngine 通过内部 Mutex 保证线程安全
+            recognize_single_image(&engine, image)
+        })
+        .collect();
     let elapsed_ms = started_at.elapsed().as_millis();
     send_event_with_id(
         None,
@@ -845,7 +858,13 @@ fn send_event_with_id(
         data,
     };
     match serde_json::to_string(&output) {
-        Ok(line) => println!("{}", line),
-        Err(_) => eprintln!("序列化输出失败"),
+        Ok(line) => {
+            println!("{}", line);
+            let _ = io::stdout().flush();
+        }
+        Err(_) => {
+            eprintln!("序列化输出失败");
+            let _ = io::stderr().flush();
+        }
     }
 }
