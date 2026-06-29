@@ -12,7 +12,6 @@
     "jsx": "preserve",
     "strict": true,
     "esModuleInterop": true,
-    "baseUrl": ".",
     "paths": {
       "aiohub-sdk": ["../../src/services/plugin-sdk"],
       "aiohub-ui": ["../../src/services/plugin-ui"],
