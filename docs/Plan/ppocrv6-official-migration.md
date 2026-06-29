@@ -244,7 +244,18 @@ OcrBackend
 - `.gitignore` 已补充 v6 ONNX 模型目录与 ORT 动态库，避免本地验证用二进制误提交。
 - 已验证：`bun run build:rust`、`bun run build:vue`、`bun run build` 通过。
 
-下一步进入 B2 前半：读取官方 `inference.yml` / `inference.json`，先实现 det/rec 配置解析与 tensor smoke，然后接入检测前处理和 DBPostProcess。
+### 2026-06-29 继续记录：B2 配置解析与 tensor smoke
+
+在 B0/B1 session smoke 基础上，已完成 B2 前半的配置解析与真实张量推理 smoke：
+
+- 新增 `serde_yaml`，Rust sidecar 现在会读取官方 det / rec `inference.yml`，解析 `NormalizeImage`、`DBPostProcess`、`RecResizeImg` 和 `CTCLabelDecode.character_dict`。
+- `OnnxRuntimeBackend::load` 在加载 det / rec session 后会立即运行一次零张量 smoke，确认 ORT runtime、ONNX 模型、配置输入 shape 和模型输出同时可用。
+- det smoke 使用官方 HPI 最小动态输入 `[1, 3, 32, 32]`，输出已验证为 `fetch_name_0: Tensor<f32>(1, 1, 32, 32)`。
+- rec smoke 使用官方识别输入 `[1, 3, 48, 320]`，输出已验证为 `fetch_name_0: Tensor<f32>(1, 40, 18710)`；当前解析到 `character_dict` 18708 项，后续 CTC 解码需要显式确认 blank / 特殊 token 对齐。
+- v6 单图调用仍返回 per-image error，明确说明完整 pipeline 尚未实现，同时包含 config、smoke、det / rec IO 摘要，stdout 保持单行 JSON Lines。
+- 已验证：`bun run build:rust` 通过；debug sidecar 空 batch 和单图占位输入 smoke 均通过。
+
+下一步进入 B2 检测链路：实现图片解码后的 det 前处理、DBPostProcess、检测框排序与最小 bbox 输出，再接入裁剪和 rec 预处理 / CTC 解码。
 
 ### 阶段 0：建立真实 benchmark
 
