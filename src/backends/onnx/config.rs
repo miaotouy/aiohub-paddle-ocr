@@ -26,7 +26,7 @@ impl Ppocrv6OnnxConfig {
             self.rec.model_name,
             self.rec.smoke_input_shape,
             self.rec.post_process_name,
-            self.rec.character_count
+            self.rec.character_count()
         )
     }
 }
@@ -35,24 +35,24 @@ impl Ppocrv6OnnxConfig {
 pub(super) struct DetOnnxConfig {
     model_name: String,
     pub(super) smoke_input_shape: [usize; 4],
-    normalize: NormalizeImageConfig,
-    post_process: DbPostProcessConfig,
+    pub(super) normalize: NormalizeImageConfig,
+    pub(super) post_process: DbPostProcessConfig,
 }
 
 #[derive(Debug, Clone)]
-struct NormalizeImageConfig {
-    mean: [f32; 3],
-    std: [f32; 3],
-    scale: f32,
-    order: String,
+pub(super) struct NormalizeImageConfig {
+    pub(super) mean: [f32; 3],
+    pub(super) std: [f32; 3],
+    pub(super) scale: f32,
+    pub(super) order: String,
 }
 
 #[derive(Debug, Clone)]
-struct DbPostProcessConfig {
-    thresh: f32,
-    box_thresh: f32,
-    unclip_ratio: f32,
-    max_candidates: u32,
+pub(super) struct DbPostProcessConfig {
+    pub(super) thresh: f32,
+    pub(super) box_thresh: f32,
+    pub(super) unclip_ratio: f32,
+    pub(super) max_candidates: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -60,7 +60,21 @@ pub(super) struct RecOnnxConfig {
     model_name: String,
     pub(super) smoke_input_shape: [usize; 4],
     post_process_name: String,
-    character_count: usize,
+    pub(super) characters: Vec<String>,
+}
+
+impl RecOnnxConfig {
+    pub(super) fn input_height(&self) -> usize {
+        self.smoke_input_shape[2]
+    }
+
+    pub(super) fn input_width(&self) -> usize {
+        self.smoke_input_shape[3]
+    }
+
+    pub(super) fn character_count(&self) -> usize {
+        self.characters.len()
+    }
 }
 
 pub(super) fn load_ppocrv6_onnx_config(
@@ -180,7 +194,7 @@ fn parse_rec_onnx_config(
         model_name,
         smoke_input_shape: [1, image_shape[0], image_shape[1], image_shape[2]],
         post_process_name,
-        character_count: characters.len(),
+        characters,
     })
 }
 

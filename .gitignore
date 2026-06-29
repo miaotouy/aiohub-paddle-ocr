@@ -17,3 +17,6 @@
 /runtime/onnxruntime/**/*.dll
 /runtime/onnxruntime/**/*.dylib
 /runtime/onnxruntime/**/*.so
+
+
+testimgs/
