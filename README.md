@@ -370,6 +370,6 @@ Benchmark 建议记录：
 - 补充各平台发布包 smoke test。
 - 补充插件市场元数据。
 - 评估常驻 sidecar daemon。
+- 评估迁移到官方 PP-OCRv6 small/medium 模型与官方推理链路，计划见 [docs/Plan/ppocrv6-official-migration.md](docs/Plan/ppocrv6-official-migration.md)。
 
 native 插件仅作为后续性能优化备选，不作为首版方向。
-

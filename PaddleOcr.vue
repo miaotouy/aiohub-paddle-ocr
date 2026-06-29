@@ -3,17 +3,25 @@
     <header class="toolbar">
       <div>
         <h2>Paddle OCR</h2>
-        <p>v{{ version }} · {{ selectedProfileName }}</p>
+        <p>v{{ version }} · {{ selectedProfileName }} · {{ selectedBackendLabel }}</p>
       </div>
       <div class="toolbar-actions">
         <el-select v-model="selectedProfileId" class="profile-select" size="default">
           <el-option
             v-for="profile in modelProfiles"
             :key="profile.id"
-            :label="profile.name"
+            :label="profileLabel(profile)"
             :value="profile.id"
           />
         </el-select>
+        <input
+          ref="testImageInput"
+          class="file-input"
+          type="file"
+          accept="image/*"
+          @change="handleTestImageChange"
+        />
+        <el-button @click="selectTestImage">选择图片</el-button>
         <el-button :loading="checking" @click="checkRuntime">检查</el-button>
         <el-button type="primary" :loading="testing" @click="runSmokeTest">测试</el-button>
       </div>
@@ -21,7 +29,7 @@
 
     <section class="status-grid">
       <div class="status-item">
-        <span class="label">后端</span>
+        <span class="label">运行时</span>
         <strong :class="runtimeStatusClass">{{ runtimeStatusText }}</strong>
       </div>
       <div class="status-item">
@@ -29,23 +37,48 @@
         <strong :class="modelStatusClass">{{ modelStatusText }}</strong>
       </div>
       <div class="status-item">
-        <span class="label">最近耗时</span>
-        <strong>{{ lastDurationText }}</strong>
+        <span class="label">后端</span>
+        <strong>{{ selectedBackendLabel }}</strong>
       </div>
       <div class="status-item">
-        <span class="label">模型数量</span>
-        <strong>{{ modelProfiles.length }}</strong>
+        <span class="label">最近耗时</span>
+        <strong>{{ lastDurationText }}</strong>
       </div>
     </section>
 
     <section class="panel">
       <div class="panel-header">
         <h3>模型文件</h3>
-        <span>models/ppocr-v5-mobile</span>
+        <span>{{ selectedModelDir }}</span>
       </div>
       <ul class="file-list">
         <li v-for="file in modelFiles" :key="file">{{ file }}</li>
       </ul>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h3>模型来源</h3>
+        <span>{{ benchmarkStatusText }}</span>
+      </div>
+      <dl class="meta-list">
+        <div>
+          <dt>来源</dt>
+          <dd>{{ selectedSourceText }}</dd>
+        </div>
+        <div>
+          <dt>Revision</dt>
+          <dd>{{ selectedRevisionText }}</dd>
+        </div>
+        <div>
+          <dt>Hash</dt>
+          <dd>{{ selectedHashText }}</dd>
+        </div>
+        <div>
+          <dt>测试图片</dt>
+          <dd>{{ selectedTestImageLabel }}</dd>
+        </div>
+      </dl>
     </section>
 
     <section class="panel">
@@ -62,6 +95,7 @@
 import { computed, ref } from 'vue';
 import { customMessage, execute } from 'aiohub-sdk';
 import manifest from './manifest.json';
+import modelRegistryJson from './models/registry.json';
 
 interface PaddleOcrResult {
   results?: Array<{
@@ -74,50 +108,43 @@ interface PaddleOcrResult {
   }>;
 }
 
+interface ModelRegistryProfile {
+  id: string;
+  name: string;
+  language: string;
+  backend: string;
+  modelDir: string;
+  family?: string;
+  tier?: string;
+  detModel?: string;
+  recModel?: string;
+  dict?: string;
+  detOnnx?: string;
+  recOnnx?: string;
+  detConfig?: string;
+  recConfig?: string;
+  experimental?: boolean;
+  sourceUrl?: string;
+  revision?: string;
+  sha256?: Record<string, string>;
+  license?: string;
+}
+
+interface ModelRegistry {
+  defaultProfile?: string;
+  profiles: ModelRegistryProfile[];
+}
+
 const version = manifest.version;
-const defaultModelProfile = 'ppocr-v5-mobile-general';
-const modelProfiles = [
-  { id: 'ppocr-v5-mobile-general', name: '通用', language: 'general' },
-  { id: 'ppocr-v5-mobile-en', name: '英文', language: 'en' },
-  { id: 'ppocr-v5-mobile-ko', name: '韩文', language: 'ko' },
-  { id: 'ppocr-v5-mobile-latin', name: '拉丁文字', language: 'latin' },
-  { id: 'ppocr-v5-mobile-arabic', name: '阿拉伯文字', language: 'arabic' },
-  { id: 'ppocr-v5-mobile-cyrillic', name: '西里尔文字', language: 'cyrillic' },
-  { id: 'ppocr-v5-mobile-el', name: '希腊文', language: 'el' },
-  { id: 'ppocr-v5-mobile-devanagari', name: '天城文', language: 'devanagari' },
-  { id: 'ppocr-v5-mobile-ta', name: '泰米尔文', language: 'ta' },
-  { id: 'ppocr-v5-mobile-te', name: '泰卢固文', language: 'te' },
-  { id: 'ppocr-v5-mobile-th', name: '泰文', language: 'th' }
-];
-const modelFiles = [
-  'ppocrv5_mobile_det.mnn',
-  'ppocrv5_mobile_rec_general.mnn',
-  'ppocrv5_mobile_dict_general.txt',
-  'ppocrv5_mobile_rec_en.mnn',
-  'ppocrv5_mobile_dict_en.txt',
-  'ppocrv5_mobile_rec_ko.mnn',
-  'ppocrv5_mobile_dict_ko.txt',
-  'ppocrv5_mobile_rec_latin.mnn',
-  'ppocrv5_mobile_dict_latin.txt',
-  'ppocrv5_mobile_rec_arabic.mnn',
-  'ppocrv5_mobile_dict_arabic.txt',
-  'ppocrv5_mobile_rec_cyrillic.mnn',
-  'ppocrv5_mobile_dict_cyrillic.txt',
-  'ppocrv5_mobile_rec_el.mnn',
-  'ppocrv5_mobile_dict_el.txt',
-  'ppocrv5_mobile_rec_devanagari.mnn',
-  'ppocrv5_mobile_dict_devanagari.txt',
-  'ppocrv5_mobile_rec_ta.mnn',
-  'ppocrv5_mobile_dict_ta.txt',
-  'ppocrv5_mobile_rec_te.mnn',
-  'ppocrv5_mobile_dict_te.txt',
-  'ppocrv5_mobile_rec_th.mnn',
-  'ppocrv5_mobile_dict_th.txt'
-];
+const modelRegistry = modelRegistryJson as ModelRegistry;
+const defaultModelProfile = modelRegistry.defaultProfile || 'ppocr-v5-mobile-general';
+const modelProfiles = modelRegistry.profiles;
 
 const checking = ref(false);
 const testing = ref(false);
 const selectedProfileId = ref(defaultModelProfile);
+const testImageInput = ref<HTMLInputElement | null>(null);
+const selectedTestImage = ref<{ name: string; dataUrl: string } | null>(null);
 const runtimeStatus = ref<'idle' | 'ready' | 'error'>('idle');
 const modelStatus = ref<'unknown' | 'ready' | 'missing'>('unknown');
 const lastDurationMs = ref<number | null>(null);
@@ -150,6 +177,45 @@ const lastResultText = computed(() => (
 const selectedProfileName = computed(() => (
   modelProfiles.find((profile) => profile.id === selectedProfileId.value)?.name || selectedProfileId.value
 ));
+const selectedProfile = computed(() => (
+  modelProfiles.find((profile) => profile.id === selectedProfileId.value) || modelProfiles[0]
+));
+const selectedBackendLabel = computed(() => {
+  if (selectedProfile.value?.backend === 'onnxruntime') return 'ONNX Runtime';
+  if (selectedProfile.value?.backend === 'mnn-ocr-rs') return 'MNN / ocr-rs';
+  return selectedProfile.value?.backend || '-';
+});
+const selectedModelDir = computed(() => selectedProfile.value?.modelDir || 'models');
+const modelFiles = computed(() => {
+  const profile = selectedProfile.value;
+  if (!profile) return [];
+
+  const fields = profile.backend === 'onnxruntime'
+    ? ['detOnnx', 'recOnnx', 'detConfig', 'recConfig', 'dict'] as const
+    : ['detModel', 'recModel', 'dict'] as const;
+
+  return fields
+    .map((field) => profile[field])
+    .filter((file): file is string => Boolean(file))
+    .map((file) => `${profile.modelDir}/${file}`);
+});
+const benchmarkStatusText = computed(() => (
+  selectedProfile.value?.experimental ? '待 benchmark' : '当前基线'
+));
+const selectedSourceText = computed(() => selectedProfile.value?.sourceUrl || '-');
+const selectedRevisionText = computed(() => selectedProfile.value?.revision || '-');
+const selectedHashText = computed(() => {
+  const sha256 = selectedProfile.value?.sha256;
+  if (sha256 && Object.keys(sha256).length > 0) {
+    return `${Object.keys(sha256).length} 个文件已记录`;
+  }
+  return selectedProfile.value?.experimental ? '待固定' : '见第三方声明';
+});
+const selectedTestImageLabel = computed(() => selectedTestImage.value?.name || '未选择');
+
+const profileLabel = (profile: ModelRegistryProfile) => (
+  profile.experimental ? `${profile.name} · 实验` : profile.name
+);
 
 const callRecognizeBatch = async (images: unknown[]) => {
   const startedAt = performance.now();
@@ -173,10 +239,56 @@ const callRecognizeBatch = async (images: unknown[]) => {
 const updateStatusFromError = (error: unknown) => {
   runtimeStatus.value = 'error';
   const message = error instanceof Error ? error.message : String(error);
-  if (message.includes('模型文件缺失') || message.includes('模型文件为空')) {
+  if (
+    message.includes('模型目录缺失')
+    || message.includes('模型文件缺失')
+    || message.includes('模型文件为空')
+    || message.includes('ONNX Runtime 动态库缺失')
+  ) {
     modelStatus.value = 'missing';
   }
   lastResult.value = { error: message };
+};
+
+const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => {
+    if (typeof reader.result === 'string') {
+      resolve(reader.result);
+    } else {
+      reject(new Error('图片读取结果无效'));
+    }
+  };
+  reader.onerror = () => reject(reader.error || new Error('图片读取失败'));
+  reader.readAsDataURL(file);
+});
+
+const selectTestImage = () => {
+  testImageInput.value?.click();
+};
+
+const handleTestImageChange = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+
+  if (!file.type.startsWith('image/')) {
+    customMessage.warning('请选择图片文件');
+    input.value = '';
+    return;
+  }
+
+  try {
+    selectedTestImage.value = {
+      name: file.name,
+      dataUrl: await readFileAsDataUrl(file)
+    };
+    customMessage.success('测试图片已选择');
+  } catch (error) {
+    selectedTestImage.value = null;
+    const message = error instanceof Error ? error.message : String(error);
+    customMessage.error(message);
+  }
 };
 
 const checkRuntime = async () => {
@@ -195,15 +307,18 @@ const checkRuntime = async () => {
 };
 
 const runSmokeTest = async () => {
+  if (!selectedTestImage.value) {
+    customMessage.warning('请先选择一张测试图片');
+    return;
+  }
+
   testing.value = true;
   try {
     const result = await callRecognizeBatch([
       {
         blockId: 'smoke-test-block',
         imageId: 'smoke-test-image',
-        dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-        width: 1,
-        height: 1
+        dataUrl: selectedTestImage.value.dataUrl
       }
     ]);
     runtimeStatus.value = 'ready';
@@ -269,7 +384,11 @@ const runSmokeTest = async () => {
 }
 
 .profile-select {
-  width: 180px;
+  width: 240px;
+}
+
+.file-input {
+  display: none;
 }
 
 .status-grid {
@@ -348,6 +467,31 @@ const runSmokeTest = async () => {
   overflow-wrap: anywhere;
 }
 
+.meta-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin: 0;
+}
+
+.meta-list div {
+  min-width: 0;
+}
+
+.meta-list dt {
+  margin-bottom: 4px;
+  color: var(--text-color-secondary);
+  font-size: 12px;
+}
+
+.meta-list dd {
+  margin: 0;
+  color: var(--text-color);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
 pre {
   min-height: 140px;
   max-height: 280px;
@@ -369,6 +513,10 @@ pre {
   }
 
   .file-list {
+    grid-template-columns: 1fr;
+  }
+
+  .meta-list {
     grid-template-columns: 1fr;
   }
 }

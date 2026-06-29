@@ -1,8 +1,10 @@
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use ocr_rs::{DetOptions, OcrEngine, OcrEngineConfig};
+use ort::session::Session;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
@@ -18,10 +20,8 @@ use std::os::fd::IntoRawFd;
 use std::os::windows::io::{FromRawHandle, IntoRawHandle};
 
 const DEFAULT_MODEL_PROFILE: &str = "ppocr-v5-mobile-general";
-const LEGACY_DEFAULT_MODEL_PROFILE: &str = "ppocr-v5-mobile";
 const MODEL_ROOT: &str = "models";
-const MODEL_FAMILY_DIR: &str = "ppocr-v5-mobile";
-const DET_MODEL_FILE: &str = "ppocrv5_mobile_det.mnn";
+const MODEL_REGISTRY_FILE: &str = "registry.json";
 
 // ============================================================================
 // 输入协议 — 常驻 JSON-RPC 格式
@@ -58,7 +58,7 @@ struct OcrImageInput {
     data_url: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct OcrOptions {
     model_profile: Option<String>,
@@ -78,94 +78,86 @@ struct OcrOptions {
 // 模型 Profile 定义
 // ============================================================================
 
-#[derive(Debug)]
-struct ModelProfile {
-    id: &'static str,
-    language: &'static str,
-    rec_file: &'static str,
-    dict_file: &'static str,
-    aliases: &'static [&'static str],
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelRegistry {
+    schema_version: u32,
+    default_profile: String,
+    profiles: Vec<ModelProfile>,
 }
 
-const MODEL_PROFILES: &[ModelProfile] = &[
-    ModelProfile {
-        id: "ppocr-v5-mobile-general",
-        language: "general",
-        rec_file: "ppocrv5_mobile_rec_general.mnn",
-        dict_file: "ppocrv5_mobile_dict_general.txt",
-        aliases: &[LEGACY_DEFAULT_MODEL_PROFILE, "general", "auto"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-en",
-        language: "en",
-        rec_file: "ppocrv5_mobile_rec_en.mnn",
-        dict_file: "ppocrv5_mobile_dict_en.txt",
-        aliases: &["en", "english"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-ko",
-        language: "ko",
-        rec_file: "ppocrv5_mobile_rec_ko.mnn",
-        dict_file: "ppocrv5_mobile_dict_ko.txt",
-        aliases: &["ko", "korean"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-latin",
-        language: "latin",
-        rec_file: "ppocrv5_mobile_rec_latin.mnn",
-        dict_file: "ppocrv5_mobile_dict_latin.txt",
-        aliases: &["latin"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-arabic",
-        language: "arabic",
-        rec_file: "ppocrv5_mobile_rec_arabic.mnn",
-        dict_file: "ppocrv5_mobile_dict_arabic.txt",
-        aliases: &["ar", "arabic"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-cyrillic",
-        language: "cyrillic",
-        rec_file: "ppocrv5_mobile_rec_cyrillic.mnn",
-        dict_file: "ppocrv5_mobile_dict_cyrillic.txt",
-        aliases: &["cyrillic"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-el",
-        language: "el",
-        rec_file: "ppocrv5_mobile_rec_el.mnn",
-        dict_file: "ppocrv5_mobile_dict_el.txt",
-        aliases: &["el", "greek"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-devanagari",
-        language: "devanagari",
-        rec_file: "ppocrv5_mobile_rec_devanagari.mnn",
-        dict_file: "ppocrv5_mobile_dict_devanagari.txt",
-        aliases: &["devanagari"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-ta",
-        language: "ta",
-        rec_file: "ppocrv5_mobile_rec_ta.mnn",
-        dict_file: "ppocrv5_mobile_dict_ta.txt",
-        aliases: &["ta", "tamil"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-te",
-        language: "te",
-        rec_file: "ppocrv5_mobile_rec_te.mnn",
-        dict_file: "ppocrv5_mobile_dict_te.txt",
-        aliases: &["te", "telugu"],
-    },
-    ModelProfile {
-        id: "ppocr-v5-mobile-th",
-        language: "th",
-        rec_file: "ppocrv5_mobile_rec_th.mnn",
-        dict_file: "ppocrv5_mobile_dict_th.txt",
-        aliases: &["th", "thai"],
-    },
-];
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct ModelProfile {
+    id: String,
+    name: String,
+    backend: ModelBackend,
+    #[allow(dead_code)]
+    family: Option<String>,
+    #[allow(dead_code)]
+    tier: Option<String>,
+    language: String,
+    model_dir: String,
+    #[serde(default)]
+    det_model: Option<String>,
+    #[serde(default)]
+    rec_model: Option<String>,
+    #[serde(default)]
+    dict: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    det_model_dir: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    rec_model_dir: Option<String>,
+    #[serde(default)]
+    det_onnx: Option<String>,
+    #[serde(default)]
+    rec_onnx: Option<String>,
+    #[serde(default)]
+    det_config: Option<String>,
+    #[serde(default)]
+    rec_config: Option<String>,
+    #[serde(default)]
+    aliases: Vec<String>,
+    #[allow(dead_code)]
+    built_in: bool,
+    #[allow(dead_code)]
+    package: bool,
+    #[allow(dead_code)]
+    experimental: bool,
+    #[allow(dead_code)]
+    source_url: Option<String>,
+    #[allow(dead_code)]
+    revision: Option<String>,
+    #[allow(dead_code)]
+    sha256: Option<serde_json::Value>,
+    #[allow(dead_code)]
+    license: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq)]
+enum ModelBackend {
+    #[serde(rename = "mnn-ocr-rs")]
+    MnnOcrRs,
+    #[serde(rename = "onnxruntime")]
+    OnnxRuntime,
+}
+
+impl ModelBackend {
+    fn id(self) -> &'static str {
+        match self {
+            Self::MnnOcrRs => "mnn-ocr-rs",
+            Self::OnnxRuntime => "onnxruntime",
+        }
+    }
+}
+
+impl fmt::Display for ModelBackend {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.id())
+    }
+}
 
 // ============================================================================
 // 输出协议
@@ -225,19 +217,72 @@ enum OcrStatus {
 // ============================================================================
 
 #[derive(Debug)]
-struct ModelPaths {
+enum ModelPaths {
+    Mnn(MnnModelPaths),
+    Onnx(OnnxModelPaths),
+}
+
+#[derive(Debug)]
+struct MnnModelPaths {
     det_path: PathBuf,
     rec_path: PathBuf,
     dict_path: PathBuf,
 }
 
-/// PaddleOcrEngine 包装 ocr_rs 引擎，通过内部 Mutex 保证 Send + Sync
-struct PaddleOcrEngine {
+#[derive(Debug)]
+struct OnnxModelPaths {
+    det_onnx_path: PathBuf,
+    rec_onnx_path: PathBuf,
+    det_config_path: PathBuf,
+    rec_config_path: PathBuf,
+}
+
+trait OcrBackend: Send + Sync {
+    fn id(&self) -> &'static str;
+    fn recognize(&self, image_bytes: &[u8]) -> Result<Vec<OcrLine>, ImageError>;
+}
+
+#[derive(Debug)]
+struct SessionIoSummary {
+    inputs: Vec<String>,
+    outputs: Vec<String>,
+}
+
+impl SessionIoSummary {
+    fn from_session(session: &Session) -> Self {
+        Self {
+            inputs: session
+                .inputs()
+                .iter()
+                .map(|input| format!("{}: {:?}", input.name(), input.dtype()))
+                .collect(),
+            outputs: session
+                .outputs()
+                .iter()
+                .map(|output| format!("{}: {:?}", output.name(), output.dtype()))
+                .collect(),
+        }
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "inputs=[{}], outputs=[{}]",
+            self.inputs.join(", "),
+            self.outputs.join(", ")
+        )
+    }
+}
+
+/// MNN 后端包装 ocr_rs 引擎，通过内部 Mutex 保证 Send + Sync。
+struct MnnOcrBackend {
     engine: Mutex<OcrEngine>,
 }
 
-impl PaddleOcrEngine {
-    fn load(model_paths: &ModelPaths, options: Option<&OcrOptions>) -> Result<Self, SidecarError> {
+impl MnnOcrBackend {
+    fn load(
+        model_paths: &MnnModelPaths,
+        options: Option<&OcrOptions>,
+    ) -> Result<Self, SidecarError> {
         let config = build_engine_config(options);
         let engine = with_native_stdout_suppressed(|| {
             OcrEngine::new(
@@ -252,6 +297,12 @@ impl PaddleOcrEngine {
         Ok(Self {
             engine: Mutex::new(engine),
         })
+    }
+}
+
+impl OcrBackend for MnnOcrBackend {
+    fn id(&self) -> &'static str {
+        "mnn-ocr-rs"
     }
 
     fn recognize(&self, image_bytes: &[u8]) -> Result<Vec<OcrLine>, ImageError> {
@@ -273,33 +324,74 @@ impl PaddleOcrEngine {
     }
 }
 
+struct OnnxRuntimeBackend {
+    _det_session: Mutex<Session>,
+    _rec_session: Mutex<Session>,
+    det_io: SessionIoSummary,
+    rec_io: SessionIoSummary,
+}
+
+impl OnnxRuntimeBackend {
+    fn load(model_paths: &OnnxModelPaths) -> Result<Self, SidecarError> {
+        let runtime_path = onnx_runtime_library_path();
+        validate_runtime_library(&runtime_path)?;
+        initialize_onnx_runtime(&runtime_path)?;
+
+        let det_session = load_onnx_session(&model_paths.det_onnx_path, "det")?;
+        let rec_session = load_onnx_session(&model_paths.rec_onnx_path, "rec")?;
+        let det_io = SessionIoSummary::from_session(&det_session);
+        let rec_io = SessionIoSummary::from_session(&rec_session);
+
+        Ok(Self {
+            _det_session: Mutex::new(det_session),
+            _rec_session: Mutex::new(rec_session),
+            det_io,
+            rec_io,
+        })
+    }
+}
+
+impl OcrBackend for OnnxRuntimeBackend {
+    fn id(&self) -> &'static str {
+        "onnxruntime"
+    }
+
+    fn recognize(&self, _image_bytes: &[u8]) -> Result<Vec<OcrLine>, ImageError> {
+        Err(ImageError::InferenceFailed(format!(
+            "PP-OCRv6 ONNX Runtime session smoke 已通过，但完整 pipeline 尚未实现。det {}; rec {}; 下一步需要接入检测前后处理、透视裁剪、识别预处理和 CTC 解码",
+            self.det_io.describe(),
+            self.rec_io.describe()
+        )))
+    }
+}
+
 // ============================================================================
 // 运行时状态：已加载引擎 + 当前 profile
 // ============================================================================
 
 struct EngineHolder {
-    current_profile_id: Option<String>,
-    engine: Option<Arc<PaddleOcrEngine>>,
+    current_engine_key: Option<String>,
+    engine: Option<Arc<dyn OcrBackend>>,
 }
 
 impl EngineHolder {
     fn new() -> Self {
         Self {
-            current_profile_id: None,
+            current_engine_key: None,
             engine: None,
         }
     }
 
-    /// 获取或加载引擎。如果请求的 profile 与当前不同，则切换。
+    /// 获取或加载引擎。如果 backend、profile 或运行时参数不同，则切换。
     /// 返回 Arc 以便在并行场景中克隆共享。
     fn get_or_load(
         &mut self,
-        profile: &'static ModelProfile,
+        profile: &ModelProfile,
         options: Option<&OcrOptions>,
-    ) -> Result<Arc<PaddleOcrEngine>, SidecarError> {
-        let profile_id = profile.id.to_string();
+    ) -> Result<Arc<dyn OcrBackend>, SidecarError> {
+        let engine_key = build_engine_key(profile, options);
 
-        if self.current_profile_id.as_deref() == Some(&profile_id) {
+        if self.current_engine_key.as_deref() == Some(&engine_key) {
             // 命中缓存
             if let Some(ref engine) = self.engine {
                 return Ok(Arc::clone(engine));
@@ -312,12 +404,20 @@ impl EngineHolder {
             None,
             "progress",
             None,
-            serde_json::json!({ "message": format!("正在切换模型: {}", profile.id), "percent": 5 }),
+            serde_json::json!({
+                "backend": profile.backend.id(),
+                "profile": profile.id.as_str(),
+                "message": format!("正在切换模型: {} ({})", profile.name.as_str(), profile.backend),
+                "percent": 5
+            }),
         );
-        let engine = PaddleOcrEngine::load(&model_paths, options)?;
+        let engine: Arc<dyn OcrBackend> = match model_paths {
+            ModelPaths::Mnn(paths) => Arc::new(MnnOcrBackend::load(&paths, options)?),
+            ModelPaths::Onnx(paths) => Arc::new(OnnxRuntimeBackend::load(&paths)?),
+        };
 
-        self.current_profile_id = Some(profile_id);
-        self.engine = Some(Arc::new(engine));
+        self.current_engine_key = Some(engine_key);
+        self.engine = Some(engine);
 
         Ok(Arc::clone(self.engine.as_ref().unwrap()))
     }
@@ -331,10 +431,15 @@ impl EngineHolder {
 enum SidecarError {
     #[error("解析输入失败: {0}")]
     InvalidInput(#[from] serde_json::Error),
+    #[error("模型 registry 无效: {0}")]
+    InvalidModelRegistry(String),
     #[error("不支持的模型 profile: {0}")]
     UnsupportedModelProfile(String),
     #[error("不支持的 language: {0}")]
     UnsupportedLanguage(String),
+    #[allow(dead_code)]
+    #[error("不支持的模型后端: {0}")]
+    UnsupportedBackend(String),
     #[error("模型目录缺失: {0}")]
     MissingModelDir(String),
     #[error("模型文件缺失: {0}")]
@@ -345,6 +450,20 @@ enum SidecarError {
     InvalidModelFormat(String),
     #[error("加载 OCR 引擎失败: {0}")]
     EngineLoadFailed(String),
+    #[error("ONNX Runtime 动态库缺失: {0}")]
+    MissingRuntimeLibrary(String),
+    #[error("ONNX Runtime 加载失败: {0}")]
+    OnnxRuntimeLoadFailed(String),
+    #[error("ONNX Runtime 版本不匹配: {0}")]
+    OnnxRuntimeVersionMismatch(String),
+    #[error("ONNX session 加载失败: {0}")]
+    OnnxSessionLoadFailed(String),
+    #[allow(dead_code)]
+    #[error("ONNX 推理失败: {0}")]
+    OnnxInferenceFailed(String),
+    #[allow(dead_code)]
+    #[error("OCR 后处理失败: {0}")]
+    PostProcessFailed(String),
 }
 
 #[derive(Debug, Error)]
@@ -367,6 +486,13 @@ enum ImageError {
 
 fn main() {
     let stdin = io::stdin();
+    let model_registry = match load_model_registry() {
+        Ok(registry) => registry,
+        Err(error) => {
+            send_event_with_id(None, "error", None, serde_json::json!(error.to_string()));
+            process::exit(1);
+        }
+    };
     let mut engine_holder = EngineHolder::new();
 
     for line_result in stdin.lock().lines() {
@@ -418,7 +544,7 @@ fn main() {
                     }
                 };
 
-                match handle_recognize_batch(&mut engine_holder, request) {
+                match handle_recognize_batch(&model_registry, &mut engine_holder, request) {
                     Ok(result) => {
                         send_event_with_id(
                             id,
@@ -453,11 +579,12 @@ fn main() {
 // ============================================================================
 
 fn handle_recognize_batch(
+    model_registry: &ModelRegistry,
     engine_holder: &mut EngineHolder,
     request: RecognizeBatchRequest,
 ) -> Result<PaddleOcrBatchResult, SidecarError> {
     let started_at = Instant::now();
-    let model_profile = resolve_model_profile(request.options.as_ref())?;
+    let model_profile = resolve_model_profile(model_registry, request.options.as_ref())?;
     // 获取/加载引擎（自动处理动态切换），返回 Arc 便于跨线程共享
     let engine = engine_holder.get_or_load(model_profile, request.options.as_ref())?;
 
@@ -467,7 +594,12 @@ fn handle_recognize_batch(
         None,
         "progress",
         None,
-        serde_json::json!({ "message": format!("开始并行识别 {} 个图片块", total), "percent": 5 }),
+        serde_json::json!({
+            "backend": model_profile.backend.id(),
+            "profile": model_profile.id.as_str(),
+            "message": format!("开始并行识别 {} 个图片块", total),
+            "percent": 5
+        }),
     );
 
     // 并行策略：
@@ -479,7 +611,7 @@ fn handle_recognize_batch(
         .map(|image| {
             // 并行执行：I/O（读文件/Base64解码）+ 推理
             // PaddleOcrEngine 通过内部 Mutex 保证线程安全
-            recognize_single_image(&engine, image)
+            recognize_single_image(engine.as_ref(), image)
         })
         .collect();
     let elapsed_ms = started_at.elapsed().as_millis();
@@ -487,25 +619,22 @@ fn handle_recognize_batch(
         None,
         "progress",
         None,
-        serde_json::json!({ "message": format!("批量识别完成，耗时 {} ms", elapsed_ms), "percent": 100 }),
+        serde_json::json!({
+            "backend": model_profile.backend.id(),
+            "profile": model_profile.id.as_str(),
+            "message": format!("批量识别完成，耗时 {} ms", elapsed_ms),
+            "percent": 100
+        }),
     );
 
     Ok(PaddleOcrBatchResult { results })
-}
-
-fn batch_percent(index: usize, total: usize) -> u32 {
-    if total == 0 {
-        return 90;
-    }
-    let ratio = index as f32 / total as f32;
-    20 + (ratio * 75.0).round() as u32
 }
 
 // ============================================================================
 // 单图识别（支持 path 零拷贝）
 // ============================================================================
 
-fn recognize_single_image(engine: &PaddleOcrEngine, image: &OcrImageInput) -> PaddleOcrImageResult {
+fn recognize_single_image(engine: &dyn OcrBackend, image: &OcrImageInput) -> PaddleOcrImageResult {
     let image_bytes = match read_image_bytes(image) {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -546,7 +675,7 @@ fn recognize_single_image(engine: &PaddleOcrEngine, image: &OcrImageInput) -> Pa
             text: String::new(),
             confidence: None,
             status: OcrStatus::Error,
-            error: Some(error.to_string()),
+            error: Some(format!("{}: {}", engine.id(), error)),
             lines: None,
         },
     }
@@ -583,15 +712,59 @@ fn average_confidence(lines: &[OcrLine]) -> Option<f32> {
 // Model Profile 解析
 // ============================================================================
 
-fn resolve_model_profile(
+fn load_model_registry() -> Result<ModelRegistry, SidecarError> {
+    let registry_path = Path::new(MODEL_ROOT).join(MODEL_REGISTRY_FILE);
+    let content = fs::read_to_string(&registry_path).map_err(|error| {
+        SidecarError::InvalidModelRegistry(format!(
+            "读取 {} 失败: {}",
+            registry_path.display(),
+            error
+        ))
+    })?;
+    let registry: ModelRegistry = serde_json::from_str(&content).map_err(|error| {
+        SidecarError::InvalidModelRegistry(format!(
+            "解析 {} 失败: {}",
+            registry_path.display(),
+            error
+        ))
+    })?;
+
+    validate_model_registry(&registry)?;
+    Ok(registry)
+}
+
+fn validate_model_registry(registry: &ModelRegistry) -> Result<(), SidecarError> {
+    if registry.schema_version != 1 {
+        return Err(SidecarError::InvalidModelRegistry(format!(
+            "不支持的 schemaVersion: {}",
+            registry.schema_version
+        )));
+    }
+    if registry.profiles.is_empty() {
+        return Err(SidecarError::InvalidModelRegistry(
+            "profiles 不能为空".to_string(),
+        ));
+    }
+    if find_model_profile(registry, &registry.default_profile).is_none() {
+        return Err(SidecarError::InvalidModelRegistry(format!(
+            "默认 profile 不存在: {}",
+            registry.default_profile
+        )));
+    }
+
+    Ok(())
+}
+
+fn resolve_model_profile<'a>(
+    registry: &'a ModelRegistry,
     options: Option<&OcrOptions>,
-) -> Result<&'static ModelProfile, SidecarError> {
+) -> Result<&'a ModelProfile, SidecarError> {
     if let Some(model_profile) = options
         .and_then(|options| options.model_profile.as_deref())
         .map(str::trim)
         .filter(|profile| !profile.is_empty())
     {
-        return find_model_profile(model_profile)
+        return find_model_profile(registry, model_profile)
             .ok_or_else(|| SidecarError::UnsupportedModelProfile(model_profile.to_string()));
     }
 
@@ -600,16 +773,20 @@ fn resolve_model_profile(
         .map(str::trim)
         .filter(|language| !language.is_empty())
     {
-        return find_language_profile(language)
+        return find_language_profile(registry, language)
             .ok_or_else(|| SidecarError::UnsupportedLanguage(language.to_string()));
     }
 
-    find_model_profile(DEFAULT_MODEL_PROFILE)
-        .ok_or_else(|| SidecarError::UnsupportedModelProfile(DEFAULT_MODEL_PROFILE.to_string()))
+    find_model_profile(registry, &registry.default_profile)
+        .or_else(|| find_model_profile(registry, DEFAULT_MODEL_PROFILE))
+        .ok_or_else(|| SidecarError::UnsupportedModelProfile(registry.default_profile.clone()))
 }
 
-fn find_model_profile(profile_id: &str) -> Option<&'static ModelProfile> {
-    MODEL_PROFILES.iter().find(|profile| {
+fn find_model_profile<'a>(
+    registry: &'a ModelRegistry,
+    profile_id: &str,
+) -> Option<&'a ModelProfile> {
+    registry.profiles.iter().find(|profile| {
         profile.id.eq_ignore_ascii_case(profile_id)
             || profile
                 .aliases
@@ -618,8 +795,11 @@ fn find_model_profile(profile_id: &str) -> Option<&'static ModelProfile> {
     })
 }
 
-fn find_language_profile(language: &str) -> Option<&'static ModelProfile> {
-    MODEL_PROFILES.iter().find(|profile| {
+fn find_language_profile<'a>(
+    registry: &'a ModelRegistry,
+    language: &str,
+) -> Option<&'a ModelProfile> {
+    registry.profiles.iter().find(|profile| {
         profile.language.eq_ignore_ascii_case(language)
             || profile
                 .aliases
@@ -633,24 +813,99 @@ fn find_language_profile(language: &str) -> Option<&'static ModelProfile> {
 // ============================================================================
 
 fn validate_model_files(model_profile: &ModelProfile) -> Result<ModelPaths, SidecarError> {
-    let model_dir = Path::new(MODEL_ROOT).join(MODEL_FAMILY_DIR);
+    let model_dir = Path::new(&model_profile.model_dir);
     if !model_dir.is_dir() {
         return Err(SidecarError::MissingModelDir(
             model_dir.display().to_string(),
         ));
     }
 
-    let paths = ModelPaths {
-        det_path: model_dir.join(DET_MODEL_FILE),
-        rec_path: model_dir.join(model_profile.rec_file),
-        dict_path: model_dir.join(model_profile.dict_file),
+    match model_profile.backend {
+        ModelBackend::MnnOcrRs => validate_mnn_model_files(model_profile, model_dir),
+        ModelBackend::OnnxRuntime => validate_onnx_model_files(model_profile, model_dir),
+    }
+}
+
+fn validate_mnn_model_files(
+    model_profile: &ModelProfile,
+    model_dir: &Path,
+) -> Result<ModelPaths, SidecarError> {
+    let paths = MnnModelPaths {
+        det_path: model_dir.join(required_profile_file(
+            model_profile,
+            "detModel",
+            &model_profile.det_model,
+        )?),
+        rec_path: model_dir.join(required_profile_file(
+            model_profile,
+            "recModel",
+            &model_profile.rec_model,
+        )?),
+        dict_path: model_dir.join(required_profile_file(
+            model_profile,
+            "dict",
+            &model_profile.dict,
+        )?),
     };
 
     validate_model_file(&paths.det_path)?;
     validate_model_file(&paths.rec_path)?;
     validate_model_file(&paths.dict_path)?;
 
-    Ok(paths)
+    Ok(ModelPaths::Mnn(paths))
+}
+
+fn validate_onnx_model_files(
+    model_profile: &ModelProfile,
+    model_dir: &Path,
+) -> Result<ModelPaths, SidecarError> {
+    let paths = OnnxModelPaths {
+        det_onnx_path: model_dir.join(required_profile_file(
+            model_profile,
+            "detOnnx",
+            &model_profile.det_onnx,
+        )?),
+        rec_onnx_path: model_dir.join(required_profile_file(
+            model_profile,
+            "recOnnx",
+            &model_profile.rec_onnx,
+        )?),
+        det_config_path: model_dir.join(required_profile_file(
+            model_profile,
+            "detConfig",
+            &model_profile.det_config,
+        )?),
+        rec_config_path: model_dir.join(required_profile_file(
+            model_profile,
+            "recConfig",
+            &model_profile.rec_config,
+        )?),
+    };
+
+    validate_model_file(&paths.det_onnx_path)?;
+    validate_model_file(&paths.rec_onnx_path)?;
+    validate_model_file(&paths.det_config_path)?;
+    validate_model_file(&paths.rec_config_path)?;
+
+    Ok(ModelPaths::Onnx(paths))
+}
+
+fn required_profile_file<'a>(
+    model_profile: &ModelProfile,
+    field_name: &str,
+    value: &'a Option<String>,
+) -> Result<&'a str, SidecarError> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|file| !file.is_empty())
+        .ok_or_else(|| {
+            SidecarError::InvalidModelRegistry(format!(
+                "profile {} 缺少 {}",
+                model_profile.id.as_str(),
+                field_name
+            ))
+        })
 }
 
 fn validate_model_file(file_path: &Path) -> Result<(), SidecarError> {
@@ -695,6 +950,126 @@ fn looks_like_safetensors(file_path: &Path) -> bool {
     };
 
     read_len >= 16 && header[8] == b'{' && header[9..read_len].windows(7).any(|w| w == b"\"dtype\"")
+}
+
+fn build_engine_key(profile: &ModelProfile, options: Option<&OcrOptions>) -> String {
+    format!(
+        "{}:{}:{}",
+        profile.backend.id(),
+        profile.id.as_str(),
+        runtime_options_fingerprint(options)
+    )
+}
+
+fn runtime_options_fingerprint(options: Option<&OcrOptions>) -> String {
+    match options {
+        Some(options) => {
+            serde_json::to_string(options).unwrap_or_else(|_| "invalid-options".to_string())
+        }
+        None => "default-options".to_string(),
+    }
+}
+
+fn validate_runtime_library(runtime_path: &Path) -> Result<(), SidecarError> {
+    if !runtime_path.is_file() {
+        return Err(SidecarError::MissingRuntimeLibrary(
+            runtime_path.display().to_string(),
+        ));
+    }
+
+    validate_model_file(runtime_path)
+}
+
+fn initialize_onnx_runtime(runtime_path: &Path) -> Result<(), SidecarError> {
+    with_native_stdout_suppressed(|| {
+        let builder = ort::init_from(runtime_path)
+            .map_err(|error| map_onnx_runtime_load_error(runtime_path, error))?;
+        builder
+            .with_name("aiohub-paddle-ocr-onnxruntime")
+            .with_telemetry(false)
+            .commit();
+        Ok(())
+    })
+}
+
+fn map_onnx_runtime_load_error(runtime_path: &Path, error: ort::Error) -> SidecarError {
+    let message = format!("{}: {}", runtime_path.display(), error);
+    if message.contains("not compatible") || message.contains("expected version") {
+        SidecarError::OnnxRuntimeVersionMismatch(message)
+    } else {
+        SidecarError::OnnxRuntimeLoadFailed(message)
+    }
+}
+
+fn load_onnx_session(model_path: &Path, role: &str) -> Result<Session, SidecarError> {
+    with_native_stdout_suppressed(|| {
+        let mut builder = Session::builder().map_err(|error| {
+            SidecarError::OnnxSessionLoadFailed(format!(
+                "{} session builder 初始化失败: {}",
+                role, error
+            ))
+        })?;
+        builder.commit_from_file(model_path).map_err(|error| {
+            SidecarError::OnnxSessionLoadFailed(format!(
+                "{} 模型 {} 加载失败: {}",
+                role,
+                model_path.display(),
+                error
+            ))
+        })
+    })
+}
+
+fn onnx_runtime_library_path() -> PathBuf {
+    Path::new("runtime")
+        .join("onnxruntime")
+        .join(onnx_runtime_platform_dir())
+        .join(onnx_runtime_library_file())
+}
+
+#[cfg(all(windows, target_arch = "x86_64"))]
+fn onnx_runtime_platform_dir() -> &'static str {
+    "windows-x64"
+}
+
+#[cfg(all(windows, target_arch = "aarch64"))]
+fn onnx_runtime_platform_dir() -> &'static str {
+    "windows-arm64"
+}
+
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+fn onnx_runtime_platform_dir() -> &'static str {
+    "macos-x64"
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn onnx_runtime_platform_dir() -> &'static str {
+    "macos-arm64"
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn onnx_runtime_platform_dir() -> &'static str {
+    "linux-x64"
+}
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+fn onnx_runtime_platform_dir() -> &'static str {
+    "linux-arm64"
+}
+
+#[cfg(windows)]
+fn onnx_runtime_library_file() -> &'static str {
+    "onnxruntime.dll"
+}
+
+#[cfg(target_os = "macos")]
+fn onnx_runtime_library_file() -> &'static str {
+    "libonnxruntime.dylib"
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn onnx_runtime_library_file() -> &'static str {
+    "libonnxruntime.so"
 }
 
 // ============================================================================

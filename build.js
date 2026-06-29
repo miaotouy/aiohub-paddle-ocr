@@ -52,95 +52,16 @@ const TARGETS = {
   }
 };
 
-const MODEL_DIR = 'models/ppocr-v5-mobile';
-const DET_MODEL_FILE = 'ppocrv5_mobile_det.mnn';
-const MODEL_PROFILES = [
-  {
-    id: 'ppocr-v5-mobile-general',
-    name: 'PP-OCRv5 Mobile General',
-    language: 'general',
-    recFile: 'ppocrv5_mobile_rec_general.mnn',
-    dictFile: 'ppocrv5_mobile_dict_general.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-en',
-    name: 'PP-OCRv5 Mobile English',
-    language: 'en',
-    recFile: 'ppocrv5_mobile_rec_en.mnn',
-    dictFile: 'ppocrv5_mobile_dict_en.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-ko',
-    name: 'PP-OCRv5 Mobile Korean',
-    language: 'ko',
-    recFile: 'ppocrv5_mobile_rec_ko.mnn',
-    dictFile: 'ppocrv5_mobile_dict_ko.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-latin',
-    name: 'PP-OCRv5 Mobile Latin',
-    language: 'latin',
-    recFile: 'ppocrv5_mobile_rec_latin.mnn',
-    dictFile: 'ppocrv5_mobile_dict_latin.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-arabic',
-    name: 'PP-OCRv5 Mobile Arabic',
-    language: 'arabic',
-    recFile: 'ppocrv5_mobile_rec_arabic.mnn',
-    dictFile: 'ppocrv5_mobile_dict_arabic.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-cyrillic',
-    name: 'PP-OCRv5 Mobile Cyrillic',
-    language: 'cyrillic',
-    recFile: 'ppocrv5_mobile_rec_cyrillic.mnn',
-    dictFile: 'ppocrv5_mobile_dict_cyrillic.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-el',
-    name: 'PP-OCRv5 Mobile Greek',
-    language: 'el',
-    recFile: 'ppocrv5_mobile_rec_el.mnn',
-    dictFile: 'ppocrv5_mobile_dict_el.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-devanagari',
-    name: 'PP-OCRv5 Mobile Devanagari',
-    language: 'devanagari',
-    recFile: 'ppocrv5_mobile_rec_devanagari.mnn',
-    dictFile: 'ppocrv5_mobile_dict_devanagari.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-ta',
-    name: 'PP-OCRv5 Mobile Tamil',
-    language: 'ta',
-    recFile: 'ppocrv5_mobile_rec_ta.mnn',
-    dictFile: 'ppocrv5_mobile_dict_ta.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-te',
-    name: 'PP-OCRv5 Mobile Telugu',
-    language: 'te',
-    recFile: 'ppocrv5_mobile_rec_te.mnn',
-    dictFile: 'ppocrv5_mobile_dict_te.txt'
-  },
-  {
-    id: 'ppocr-v5-mobile-th',
-    name: 'PP-OCRv5 Mobile Thai',
-    language: 'th',
-    recFile: 'ppocrv5_mobile_rec_th.mnn',
-    dictFile: 'ppocrv5_mobile_dict_th.txt'
-  }
-];
+const MODEL_REGISTRY_FILE = 'models/registry.json';
+const MODEL_REGISTRY = readJson(path.join(__dirname, MODEL_REGISTRY_FILE));
+const MODEL_PROFILES = MODEL_REGISTRY.profiles || [];
+const PACKAGE_MODEL_PROFILES = MODEL_PROFILES.filter((profile) => (
+  profile.package !== false && profile.builtIn !== false
+));
 
-const MODEL_FILES = Array.from(new Set([
-  `${MODEL_DIR}/${DET_MODEL_FILE}`,
-  ...MODEL_PROFILES.flatMap((profile) => [
-    `${MODEL_DIR}/${profile.recFile}`,
-    `${MODEL_DIR}/${profile.dictFile}`
-  ])
-]));
+const MODEL_FILES = Array.from(new Set(
+  PACKAGE_MODEL_PROFILES.flatMap((profile) => getRequiredModelFiles(profile))
+));
 
 const CURRENT_PLATFORM = process.platform === 'win32' ? 'windows'
   : process.platform === 'darwin' ? 'macos'
@@ -176,6 +97,108 @@ function readJson(filePath) {
 
 function writeJson(filePath, data) {
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`);
+}
+
+function registryPath(...segments) {
+  return path.posix.join(
+    ...segments
+      .filter(Boolean)
+      .map((segment) => String(segment).replace(/\\/g, '/'))
+  );
+}
+
+function requireProfileFile(profile, fieldName) {
+  const value = profile[fieldName];
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`模型 registry 中的 ${profile.id} 缺少 ${fieldName}`);
+  }
+  return value;
+}
+
+function getRequiredModelFiles(profile) {
+  const modelDir = requireProfileFile(profile, 'modelDir');
+
+  if (profile.backend === 'mnn-ocr-rs') {
+    return [
+      registryPath(modelDir, requireProfileFile(profile, 'detModel')),
+      registryPath(modelDir, requireProfileFile(profile, 'recModel')),
+      registryPath(modelDir, requireProfileFile(profile, 'dict'))
+    ];
+  }
+
+  if (profile.backend === 'onnxruntime') {
+    const files = [
+      registryPath(modelDir, requireProfileFile(profile, 'detOnnx')),
+      registryPath(modelDir, requireProfileFile(profile, 'recOnnx')),
+      registryPath(modelDir, requireProfileFile(profile, 'detConfig')),
+      registryPath(modelDir, requireProfileFile(profile, 'recConfig'))
+    ];
+    if (profile.dict) {
+      files.push(registryPath(modelDir, profile.dict));
+    }
+    return files;
+  }
+
+  throw new Error(`不支持的模型 backend: ${profile.backend}`);
+}
+
+function copyFilePreservingPath(relativePath, distDir) {
+  const sourcePath = path.join(__dirname, relativePath);
+  const targetPath = path.join(distDir, relativePath);
+  ensureDir(path.dirname(targetPath));
+  fs.copyFileSync(sourcePath, targetPath);
+}
+
+function copyIfExistsPreservingPath(relativePath, distDir) {
+  const sourcePath = path.join(__dirname, relativePath);
+  if (fs.existsSync(sourcePath)) {
+    copyFilePreservingPath(relativePath, distDir);
+    return true;
+  }
+  return false;
+}
+
+function copyModelMetadata(distDir) {
+  copyFilePreservingPath(MODEL_REGISTRY_FILE, distDir);
+  console.log(`复制模型清单 -> ${MODEL_REGISTRY_FILE}`);
+
+  const readmeFiles = Array.from(new Set(
+    MODEL_PROFILES
+      .filter((profile) => typeof profile.modelDir === 'string')
+      .map((profile) => registryPath(profile.modelDir, 'README.md'))
+  ));
+
+  for (const readmeFile of readmeFiles) {
+    if (copyIfExistsPreservingPath(readmeFile, distDir)) {
+      console.log(`复制模型说明 -> ${readmeFile}`);
+    }
+  }
+}
+
+function toManifestModelProfile(profile) {
+  const result = {
+    id: profile.id,
+    name: profile.name,
+    language: profile.language,
+    backend: profile.backend
+  };
+
+  for (const key of ['family', 'tier', 'experimental', 'sourceUrl', 'revision', 'license']) {
+    if (profile[key] !== undefined) {
+      result[key] = profile[key];
+    }
+  }
+
+  return result;
+}
+
+function applyRegistryToManifest(manifest) {
+  for (const contribution of manifest.contributions || []) {
+    if (contribution.type === 'ocr-engine') {
+      contribution.modelProfiles = MODEL_PROFILES.map(toManifestModelProfile);
+      contribution.defaultModelProfile = MODEL_REGISTRY.defaultProfile;
+    }
+  }
 }
 
 function run(command) {
@@ -272,10 +295,8 @@ function packagePlugin() {
   const target = TARGETS[targetPlatform];
   const distDir = path.join(__dirname, 'dist');
   const binDir = path.join(distDir, 'bin');
-  const modelDestDir = path.join(distDir, MODEL_DIR);
 
   ensureDir(binDir);
-  ensureDir(modelDestDir);
 
   const binaryPath = path.join(
     __dirname,
@@ -294,14 +315,15 @@ function packagePlugin() {
   console.log(`复制 sidecar -> bin/${target.packageExecutable}`);
 
   if (shouldPackage) {
+    copyModelMetadata(distDir);
     for (const relativePath of MODEL_FILES) {
-      const fileName = path.basename(relativePath);
-      fs.copyFileSync(path.join(__dirname, relativePath), path.join(modelDestDir, fileName));
-      console.log(`复制模型 -> ${MODEL_DIR}/${fileName}`);
+      copyFilePreservingPath(relativePath, distDir);
+      console.log(`复制模型 -> ${relativePath}`);
     }
   }
 
   const manifest = readJson(path.join(__dirname, 'manifest.json'));
+  applyRegistryToManifest(manifest);
   manifest.sidecar.executable = {
     [target.manifestKey]: `bin/${target.packageExecutable}`
   };

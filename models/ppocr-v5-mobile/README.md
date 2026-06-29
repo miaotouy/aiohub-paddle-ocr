@@ -1,6 +1,6 @@
 # ppocr-v5-mobile 模型目录
 
-发布 ZIP 需要在本目录放置 sidecar 注册表声明的模型文件。文件名是插件内部规范名，不需要和 PaddleOCR 上游原始文件名保持一致。
+发布 ZIP 需要在本目录放置 `models/registry.json` 声明的 MNN 模型文件。文件名是插件内部规范名，不需要和 PaddleOCR 上游原始文件名保持一致。
 
 ## 当前文件
 
@@ -75,6 +75,7 @@ ppocr-v5-mobile-th      -> ppocrv5_mobile_rec_th.mnn      + ppocrv5_mobile_dict_
 
 如果最终选择 ONNX Runtime、Paddle Inference 或其他 Rust OCR 库，而不是 MNN，需要同步修改：
 
-- `src/main.rs` 的模型 profile 注册表和模型文件校验逻辑。
-- `build.js` 的模型 profile 注册表。
+- `models/registry.json` 的模型 profile、backend 和文件清单。
+- `src/main.rs` 的后端实现和模型文件校验逻辑。
+- `build.js` 的模型清单读取与打包校验。
 - 本目录的文件命名说明。

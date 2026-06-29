@@ -12,3 +12,8 @@
 /models/ppocr-v5-mobile/keys.txt
 /models/ppocr-v5-mobile/ppocr_keys*.txt
 /models/ppocr-v5-mobile/ppocrv5_mobile_dict*.txt
+/models/ppocr-v6-small-onnx/det/
+/models/ppocr-v6-small-onnx/rec/
+/runtime/onnxruntime/**/*.dll
+/runtime/onnxruntime/**/*.dylib
+/runtime/onnxruntime/**/*.so
