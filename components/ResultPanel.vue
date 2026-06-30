@@ -17,81 +17,83 @@
       </el-button>
     </div>
 
-    <div v-if="errorMessage" class="error-state">
-      <strong>调用失败</strong>
-      <p>{{ errorMessage }}</p>
-    </div>
+    <div class="result-body">
+      <div v-if="errorMessage" class="error-state">
+        <strong>调用失败</strong>
+        <p>{{ errorMessage }}</p>
+      </div>
 
-    <div v-else-if="isProcessing" class="empty-state">
-      <strong>正在识别</strong>
-      <p>结果会在完成后显示在这里。</p>
-    </div>
+      <div v-else-if="isProcessing" class="empty-state">
+        <strong>正在识别</strong>
+        <p>结果会在完成后显示在这里。</p>
+      </div>
 
-    <div v-else-if="resultGroups.length === 0" class="empty-state">
-      <strong>暂无结果</strong>
-      <p>选择图片并开始识别后，这里会显示格式化文本。</p>
-    </div>
+      <div v-else-if="resultGroups.length === 0" class="empty-state">
+        <strong>暂无结果</strong>
+        <p>选择图片并开始识别后，这里会显示格式化文本。</p>
+      </div>
 
-    <div v-else class="result-list">
-      <section
-        v-for="group in resultGroups"
-        :key="group.result.imageId"
-        class="result-group"
-      >
-        <div class="group-header">
-          <div>
-            <strong>{{ selectedImageName || group.result.imageId }}</strong>
-            <span>{{ group.result.status === "success" ? "识别成功" : "识别异常" }}</span>
-          </div>
-          <el-tag
-            size="small"
-            :type="group.result.status === 'success' ? 'success' : 'danger'"
-          >
-            {{ group.lines.length }} 行
-          </el-tag>
-        </div>
-
-        <p v-if="group.result.status === 'error'" class="group-error">
-          {{ group.result.error || "该图片识别失败" }}
-        </p>
-
-        <div
-          v-for="line in group.lines"
-          :key="line.key"
-          class="line-item"
-          @dblclick="startEdit(line.key, line.text)"
+      <div v-else class="result-list">
+        <section
+          v-for="group in resultGroups"
+          :key="group.result.imageId"
+          class="result-group"
         >
-          <div class="line-meta">
-            <span>{{ line.label }}</span>
-            <span v-if="line.score !== null">{{ formatConfidence(line.score) }}</span>
+          <div class="group-header">
+            <div>
+              <strong>{{ selectedImageName || group.result.imageId }}</strong>
+              <span>{{ group.result.status === "success" ? "识别成功" : "识别异常" }}</span>
+            </div>
+            <el-tag
+              size="small"
+              :type="group.result.status === 'success' ? 'success' : 'danger'"
+            >
+              {{ group.lines.length }} 行
+            </el-tag>
           </div>
 
-          <div v-if="editingKey === line.key" class="line-editor">
-            <el-input
-              v-model="editingValue"
-              type="textarea"
-              :autosize="{ minRows: 2, maxRows: 4 }"
-              @keydown.ctrl.enter.prevent="saveEdit"
-            />
-            <div class="line-actions">
-              <el-button size="small" type="primary" @click="saveEdit">保存</el-button>
-              <el-button size="small" plain @click="cancelEdit">取消</el-button>
-            </div>
-          </div>
+          <p v-if="group.result.status === 'error'" class="group-error">
+            {{ group.result.error || "该图片识别失败" }}
+          </p>
 
-          <template v-else>
-            <p class="line-text">{{ getLineText(line.key, line.text) }}</p>
-            <div class="line-actions">
-              <el-button size="small" text @click="copyText(getLineText(line.key, line.text))">
-                复制
-              </el-button>
-              <el-button size="small" text @click="startEdit(line.key, line.text)">
-                编辑
-              </el-button>
+          <div
+            v-for="line in group.lines"
+            :key="line.key"
+            class="line-item"
+            @dblclick="startEdit(line.key, line.text)"
+          >
+            <div class="line-meta">
+              <span>{{ line.label }}</span>
+              <span v-if="line.score !== null">{{ formatConfidence(line.score) }}</span>
             </div>
-          </template>
-        </div>
-      </section>
+
+            <div v-if="editingKey === line.key" class="line-editor">
+              <el-input
+                v-model="editingValue"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 4 }"
+                @keydown.ctrl.enter.prevent="saveEdit"
+              />
+              <div class="line-actions">
+                <el-button size="small" type="primary" @click="saveEdit">保存</el-button>
+                <el-button size="small" plain @click="cancelEdit">取消</el-button>
+              </div>
+            </div>
+
+            <template v-else>
+              <p class="line-text">{{ getLineText(line.key, line.text) }}</p>
+              <div class="line-actions">
+                <el-button size="small" text @click="copyText(getLineText(line.key, line.text))">
+                  复制
+                </el-button>
+                <el-button size="small" text @click="startEdit(line.key, line.text)">
+                  编辑
+                </el-button>
+              </div>
+            </template>
+          </div>
+        </section>
+      </div>
     </div>
 
     <el-collapse v-if="hasRawJson" v-model="rawPanelNames" class="raw-collapse">
@@ -120,6 +122,7 @@ interface DisplayLine {
 
 const props = defineProps<{
   result: PaddleOcrBatchResult | null;
+  rawResult?: unknown | null;
   isProcessing: boolean;
   selectedImageName: string | null;
   errorMessage?: string | null;
@@ -149,9 +152,12 @@ const resultSummary = computed(() => {
   return `${resultCount} 张图片 · ${lineCount} 行文本`;
 });
 
-const rawJson = computed(() =>
-  props.result ? JSON.stringify(props.result, null, 2) : props.errorMessage || ""
-);
+const rawJson = computed(() => {
+  const payload = props.rawResult ?? props.result;
+  return payload !== null && payload !== undefined
+    ? JSON.stringify(payload, null, 2)
+    : props.errorMessage || "";
+});
 
 const hasRawJson = computed(() => Boolean(rawJson.value));
 
@@ -263,7 +269,10 @@ function toggleRawJson() {
 .result-panel {
   width: 400px;
   min-width: 360px;
+  height: 100%;
+  min-height: 0;
   gap: 12px;
+  overflow: hidden;
 }
 
 .panel-heading {
@@ -295,14 +304,22 @@ function toggleRawJson() {
   flex-shrink: 0;
 }
 
-.result-list {
+.result-body {
   min-height: 0;
   flex: 1;
+  overflow: hidden;
+}
+
+.result-list {
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding-right: 2px;
+  scrollbar-gutter: stable;
 }
 
 .result-group {
@@ -384,6 +401,7 @@ function toggleRawJson() {
 .empty-state,
 .error-state {
   display: flex;
+  height: 100%;
   min-height: 180px;
   flex-direction: column;
   align-items: center;

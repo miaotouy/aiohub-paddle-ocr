@@ -43,6 +43,7 @@
 
     <ResultPanel
       :result="lastResult"
+      :raw-result="lastRawResult"
       :is-processing="isProcessing"
       :selected-image-name="selectedImage?.name || null"
       :error-message="lastError"
@@ -89,6 +90,7 @@ const runtimeStatus = ref<RuntimeStatus>("idle");
 const modelStatus = ref<ModelStatus>("unknown");
 const lastDurationMs = ref<number | null>(null);
 const lastResult = ref<PaddleOcrBatchResult | null>(null);
+const lastRawResult = ref<unknown | null>(null);
 const lastError = ref<string | null>(null);
 
 const isChecking = ref(false);
@@ -372,6 +374,7 @@ async function handleImageFile(file: File) {
       dataUrl: await readBlobAsDataUrl(file),
     };
     lastResult.value = null;
+    lastRawResult.value = null;
     lastError.value = null;
     customMessage.success("图片已载入");
   } catch (error) {
@@ -388,6 +391,7 @@ async function handleImagePath(path: string) {
       dataUrl: await readPathAsDataUrl(path),
     };
     lastResult.value = null;
+    lastRawResult.value = null;
     lastError.value = null;
     customMessage.success("图片已载入");
   } catch (error) {
@@ -398,13 +402,15 @@ async function handleImagePath(path: string) {
 function clearImage() {
   selectedImage.value = null;
   lastResult.value = null;
+  lastRawResult.value = null;
   lastError.value = null;
 }
 
 async function callRecognizeBatch(images: unknown[]) {
   const startedAt = performance.now();
   try {
-    const result = (await execute({
+    lastRawResult.value = null;
+    const response = (await execute({
       service: PLUGIN_ID,
       method: "recognizeBatch",
       params: {
@@ -413,8 +419,10 @@ async function callRecognizeBatch(images: unknown[]) {
           modelProfile: selectedProfileId.value,
         },
       },
-    })) as PaddleOcrBatchResult;
+    })) as unknown;
 
+    lastRawResult.value = response;
+    const result = normalizeRecognizeBatchResponse(response);
     lastResult.value = result;
     lastError.value = null;
     return result;
@@ -576,6 +584,59 @@ function getOcrContribution() {
     | undefined;
 }
 
+function normalizeRecognizeBatchResponse(response: unknown): PaddleOcrBatchResult {
+  const directResult = readBatchResult(response);
+  if (directResult) {
+    return directResult;
+  }
+
+  if (isRecord(response)) {
+    if (response.success === false) {
+      throw new Error(readEnvelopeError(response) || "OCR 调用返回失败");
+    }
+
+    const dataResult = readBatchResult(response.data);
+    if (dataResult) {
+      return dataResult;
+    }
+  }
+
+  throw new Error("OCR 返回结构异常：未找到 results 或 data.results");
+}
+
+function readBatchResult(value: unknown): PaddleOcrBatchResult | null {
+  if (!isRecord(value) || !Array.isArray(value.results)) {
+    return null;
+  }
+
+  return {
+    results: value.results as PaddleOcrBatchResult["results"],
+  };
+}
+
+function readEnvelopeError(response: Record<string, unknown>) {
+  const candidates = [response.error, response.message, response.data];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate;
+    }
+
+    if (isRecord(candidate)) {
+      const nested = candidate.message || candidate.error;
+      if (typeof nested === "string" && nested.trim()) {
+        return nested;
+      }
+    }
+  }
+
+  return "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -634,6 +695,7 @@ function toErrorMessage(error: unknown) {
   :deep(.result-panel) {
     grid-column: 1 / -1;
     width: 100%;
+    height: clamp(360px, 54vh, 620px);
     min-height: 360px;
   }
 }
