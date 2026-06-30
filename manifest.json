@@ -53,6 +53,18 @@
       "method": "recognizeBatch",
       "modelProfiles": [
         {
+          "id": "ppocr-v6-small-onnx",
+          "name": "PP-OCRv6 Small ONNX（实验）",
+          "language": "multilingual",
+          "backend": "onnxruntime",
+          "family": "ppocr-v6",
+          "tier": "small",
+          "experimental": true,
+          "sourceUrl": "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx ; https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx",
+          "revision": "det@28fe5895c24fd108c19eb3e8479f4ab385fbfc62; rec@b8f84f0b80c529de40b4fbb3544b84fa7233a513",
+          "license": "Apache-2.0"
+        },
+        {
           "id": "ppocr-v5-mobile-general",
           "name": "PP-OCRv5 Mobile 通用",
           "language": "general",
@@ -150,18 +162,6 @@
           "family": "ppocr-v5",
           "tier": "mobile",
           "experimental": false
-        },
-        {
-          "id": "ppocr-v6-small-onnx",
-          "name": "PP-OCRv6 Small ONNX（实验）",
-          "language": "multilingual",
-          "backend": "onnxruntime",
-          "family": "ppocr-v6",
-          "tier": "small",
-          "experimental": true,
-          "sourceUrl": "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det_onnx ; https://huggingface.co/PaddlePaddle/PP-OCRv6_small_rec_onnx",
-          "revision": "det@28fe5895c24fd108c19eb3e8479f4ab385fbfc62; rec@b8f84f0b80c529de40b4fbb3544b84fa7233a513",
-          "license": "Apache-2.0"
         }
       ],
       "defaultModelProfile": "ppocr-v5-mobile-general",
