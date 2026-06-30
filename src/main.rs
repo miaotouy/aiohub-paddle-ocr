@@ -18,13 +18,11 @@ use std::process;
 
 fn main() {
     let stdin = io::stdin();
-    let model_registry = match load_model_registry() {
-        Ok(registry) => registry,
-        Err(error) => {
-            send_event_with_id(None, "error", None, serde_json::json!(error.to_string()));
-            process::exit(1);
-        }
-    };
+    if let Err(error) = load_model_registry() {
+        send_event_with_id(None, "error", None, serde_json::json!(error.to_string()));
+        process::exit(1);
+    }
+
     let mut engine_holder = EngineHolder::new();
 
     for line_result in stdin.lock().lines() {
@@ -63,6 +61,14 @@ fn main() {
 
         match input.method.as_str() {
             "recognizeBatch" => {
+                let model_registry = match load_model_registry() {
+                    Ok(registry) => registry,
+                    Err(error) => {
+                        send_event_with_id(id, "error", None, serde_json::json!(error.to_string()));
+                        continue;
+                    }
+                };
+
                 let request: RecognizeBatchRequest = match serde_json::from_value(input.params) {
                     Ok(r) => r,
                     Err(e) => {

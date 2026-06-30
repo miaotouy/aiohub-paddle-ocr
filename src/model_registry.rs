@@ -1,6 +1,7 @@
 use crate::errors::SidecarError;
 use crate::protocol::OcrOptions;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::fmt;
 use std::fs;
 use std::io::Read;
@@ -53,10 +54,13 @@ pub(crate) struct ModelProfile {
     #[serde(default)]
     aliases: Vec<String>,
     #[allow(dead_code)]
+    #[serde(default)]
     built_in: bool,
     #[allow(dead_code)]
+    #[serde(default)]
     package: bool,
     #[allow(dead_code)]
+    #[serde(default)]
     experimental: bool,
     #[allow(dead_code)]
     source_url: Option<String>,
@@ -121,7 +125,7 @@ pub(crate) fn load_model_registry() -> Result<ModelRegistry, SidecarError> {
             error
         ))
     })?;
-    let registry: ModelRegistry = serde_json::from_str(&content).map_err(|error| {
+    let mut registry: ModelRegistry = serde_json::from_str(&content).map_err(|error| {
         SidecarError::InvalidModelRegistry(format!(
             "解析 {} 失败: {}",
             registry_path.display(),
@@ -129,8 +133,56 @@ pub(crate) fn load_model_registry() -> Result<ModelRegistry, SidecarError> {
         ))
     })?;
 
+    merge_custom_model_registry(&mut registry);
     validate_model_registry(&registry)?;
     Ok(registry)
+}
+
+fn merge_custom_model_registry(registry: &mut ModelRegistry) {
+    let data_dir = match env::var("AIOHUB_PLUGIN_DATA_DIR") {
+        Ok(data_dir) if !data_dir.trim().is_empty() => data_dir,
+        _ => return,
+    };
+
+    let custom_registry_path = Path::new(&data_dir).join("custom-registry.json");
+    if !custom_registry_path.is_file() {
+        return;
+    }
+
+    let custom_content = match fs::read_to_string(&custom_registry_path) {
+        Ok(content) => content,
+        Err(error) => {
+            eprintln!(
+                "读取自定义模型 registry 失败 {}: {}",
+                custom_registry_path.display(),
+                error
+            );
+            return;
+        }
+    };
+
+    let custom_registry: ModelRegistry = match serde_json::from_str(&custom_content) {
+        Ok(registry) => registry,
+        Err(error) => {
+            eprintln!(
+                "解析自定义模型 registry 失败 {}: {}",
+                custom_registry_path.display(),
+                error
+            );
+            return;
+        }
+    };
+
+    for custom_profile in custom_registry.profiles {
+        if registry
+            .profiles
+            .iter()
+            .any(|profile| profile.id.eq_ignore_ascii_case(&custom_profile.id))
+        {
+            continue;
+        }
+        registry.profiles.push(custom_profile);
+    }
 }
 
 pub(crate) fn resolve_model_profile<'a>(
