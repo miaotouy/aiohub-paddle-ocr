@@ -62,6 +62,15 @@ export interface PaddleOcrBatchResult {
   results?: PaddleOcrImageResult[];
 }
 
+export interface PaddleOcrHealthCheckResult {
+  ready: boolean;
+  status: string;
+  backend: ModelBackend;
+  profile: string;
+  profileName: string;
+  modelFiles: string;
+}
+
 export interface ImportModelForm {
   modelName: string;
   backend: "mnn-ocr-rs" | "onnxruntime";

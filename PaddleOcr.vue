@@ -67,6 +67,7 @@ import type {
   ModelRegistryProfile,
   ModelStatus,
   PaddleOcrBatchResult,
+  PaddleOcrHealthCheckResult,
   RuntimeStatus,
   SelectedOcrImage,
 } from "./components/types";
@@ -431,6 +432,29 @@ async function callRecognizeBatch(images: unknown[]) {
   }
 }
 
+async function callHealthCheck(): Promise<PaddleOcrHealthCheckResult> {
+  const startedAt = performance.now();
+  try {
+    lastRawResult.value = null;
+    lastResult.value = null;
+    const response = (await execute({
+      service: PLUGIN_ID,
+      method: "healthCheck",
+      params: {
+        options: {
+          modelProfile: selectedProfileId.value,
+        },
+      },
+    })) as unknown;
+
+    lastRawResult.value = response;
+    lastError.value = null;
+    return normalizeHealthCheckResponse(response);
+  } finally {
+    lastDurationMs.value = performance.now() - startedAt;
+  }
+}
+
 function updateStatusFromError(error: unknown) {
   runtimeStatus.value = "error";
   const message = toErrorMessage(error);
@@ -452,10 +476,10 @@ function updateStatusFromError(error: unknown) {
 async function checkRuntime() {
   isChecking.value = true;
   try {
-    await callRecognizeBatch([]);
+    await callHealthCheck();
     runtimeStatus.value = "ready";
     modelStatus.value = "ready";
-    customMessage.success("Paddle OCR 后端可调用");
+    customMessage.success("Paddle OCR 健康检查通过");
   } catch (error) {
     updateStatusFromError(error);
     customMessage.error("Paddle OCR 检查失败");
@@ -602,6 +626,41 @@ function normalizeRecognizeBatchResponse(response: unknown): PaddleOcrBatchResul
   }
 
   throw new Error("OCR 返回结构异常：未找到 results 或 data.results");
+}
+
+function normalizeHealthCheckResponse(response: unknown): PaddleOcrHealthCheckResult {
+  const directResult = readHealthCheckResult(response);
+  if (directResult) {
+    return directResult;
+  }
+
+  if (isRecord(response)) {
+    if (response.success === false) {
+      throw new Error(readEnvelopeError(response) || "健康检查返回失败");
+    }
+
+    const dataResult = readHealthCheckResult(response.data);
+    if (dataResult) {
+      return dataResult;
+    }
+  }
+
+  throw new Error("健康检查返回结构异常：未找到 ready/status");
+}
+
+function readHealthCheckResult(value: unknown): PaddleOcrHealthCheckResult | null {
+  if (!isRecord(value) || value.ready !== true || typeof value.status !== "string") {
+    return null;
+  }
+
+  return {
+    ready: value.ready,
+    status: value.status,
+    backend: typeof value.backend === "string" ? value.backend : "",
+    profile: typeof value.profile === "string" ? value.profile : "",
+    profileName: typeof value.profileName === "string" ? value.profileName : "",
+    modelFiles: typeof value.modelFiles === "string" ? value.modelFiles : "",
+  };
 }
 
 function readBatchResult(value: unknown): PaddleOcrBatchResult | null {

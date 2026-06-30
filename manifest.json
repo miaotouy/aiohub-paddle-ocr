@@ -17,12 +17,24 @@
       "win32-x64": "target/x86_64-pc-windows-msvc/debug/aiohub-paddle-ocr.exe"
     },
     "args": [],
-    "startupMethod": "recognizeBatch",
-    "startupParams": {
-      "images": []
-    }
+    "startupMethod": "healthCheck",
+    "startupParams": {}
   },
   "methods": [
+    {
+      "name": "healthCheck",
+      "displayName": "运行时健康检查",
+      "description": "检查 Paddle OCR sidecar、模型清单和默认模型文件是否可用，不执行 OCR 识别",
+      "parameters": [
+        {
+          "name": "options",
+          "type": "object",
+          "required": false,
+          "description": "可选模型 profile、语言和识别参数，用于检查指定模型文件"
+        }
+      ],
+      "returnType": "Promise<PaddleOcrHealthCheckResult>"
+    },
     {
       "name": "recognizeBatch",
       "displayName": "批量 OCR 识别",

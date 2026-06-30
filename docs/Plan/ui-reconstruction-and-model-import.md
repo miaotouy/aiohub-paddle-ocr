@@ -140,7 +140,7 @@ PaddleOcr.vue (状态所有者)
 │   ├── loadRegistry() → 动态读取并合并内置与自定义注册表
 │   ├── importCustomModel(formData) → 保存模型文件到 storage 并更新 custom-registry.json
 │   ├── callRecognizeBatch(images) → 调用 sidecar
-│   ├── checkRuntime() → 空 batch 检查
+│   ├── checkRuntime() → 调用 healthCheck 检查 sidecar 与模型文件
 │   └── runOcr() → 对选中图片执行识别
 │
 └── 子组件通过 Props 接收状态，通过 Emits 通知父组件

@@ -48,6 +48,23 @@ pub(crate) struct OcrOptions {
     pub(crate) unclip_ratio: Option<f32>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HealthCheckRequest {
+    pub(crate) options: Option<OcrOptions>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct HealthCheckResult {
+    pub(crate) ready: bool,
+    pub(crate) status: String,
+    pub(crate) backend: String,
+    pub(crate) profile: String,
+    pub(crate) profile_name: String,
+    pub(crate) model_files: String,
+}
+
 /// 带 id 的输出事件，支持 JSON-RPC 匹配
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
