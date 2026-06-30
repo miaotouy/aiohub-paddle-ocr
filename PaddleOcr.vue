@@ -32,23 +32,25 @@
       @import-model="isImportDialogVisible = true"
     />
 
-    <PreviewPanel
-      :selected-image="selectedImage"
-      :is-processing="isProcessing"
-      :ocr-lines="previewLines"
-      @image-selected="handleImageFile"
-      @image-path-selected="handleImagePath"
-      @image-cleared="clearImage"
-    />
+    <div class="main-content">
+      <PreviewPanel
+        :selected-image="selectedImage"
+        :is-processing="isProcessing"
+        :ocr-lines="previewLines"
+        @image-selected="handleImageFile"
+        @image-path-selected="handleImagePath"
+        @image-cleared="clearImage"
+      />
 
-    <ResultPanel
-      :result="lastResult"
-      :raw-result="lastRawResult"
-      :is-processing="isProcessing"
-      :selected-image-name="selectedImage?.name || null"
-      :error-message="lastError"
-      @send-to-chat="handleSendToChat"
-    />
+      <ResultPanel
+        :result="lastResult"
+        :raw-result="lastRawResult"
+        :is-processing="isProcessing"
+        :selected-image-name="selectedImage?.name || null"
+        :error-message="lastError"
+        @send-to-chat="handleSendToChat"
+      />
+    </div>
   </div>
 </template>
 
@@ -705,6 +707,7 @@ function toErrorMessage(error: unknown) {
 .paddle-ocr {
   box-sizing: border-box;
   display: flex;
+  flex-direction: column;
   gap: 16px;
   height: 100%;
   min-height: 0;
@@ -720,6 +723,15 @@ function toErrorMessage(error: unknown) {
 
 .file-input {
   display: none;
+}
+
+.main-content {
+  display: flex;
+  flex-direction: row;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 :deep(.glass-panel) {
@@ -743,32 +755,27 @@ function toErrorMessage(error: unknown) {
   }
 }
 
-@media (max-width: 1180px) {
-  .paddle-ocr {
-    display: grid;
-    grid-template-columns: 300px minmax(0, 1fr);
-    grid-auto-rows: minmax(260px, auto);
-    overflow: auto;
+@media (max-width: 1024px) {
+  .main-content {
+    flex-direction: column;
+    overflow-y: auto;
   }
 
   :deep(.result-panel) {
-    grid-column: 1 / -1;
-    width: 100%;
-    height: clamp(360px, 54vh, 620px);
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
     min-height: 360px;
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 768px) {
   .paddle-ocr {
-    grid-template-columns: 1fr;
     padding: 12px;
+    overflow-y: auto;
   }
-
-  :deep(.control-panel),
-  :deep(.result-panel) {
-    width: 100%;
-    min-width: 0;
+  .main-content {
+    overflow: visible;
   }
 }
 </style>

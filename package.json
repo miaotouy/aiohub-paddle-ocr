@@ -25,6 +25,8 @@
     "archiver": "^7.0.1",
     "rimraf": "^5.0.7",
     "vite": "^8.0.16"
+  },
+  "dependencies": {
+    "lucide-vue-next": "^1.0.0"
   }
 }
-
