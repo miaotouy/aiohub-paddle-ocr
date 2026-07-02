@@ -17,6 +17,25 @@
       </el-button>
     </div>
 
+    <div class="view-selector">
+      <button
+        type="button"
+        class="selector-btn"
+        :class="{ active: activeTab === 'lines' }"
+        @click="activeTab = 'lines'"
+      >
+        按行对照
+      </button>
+      <button
+        type="button"
+        class="selector-btn"
+        :class="{ active: activeTab === 'text' }"
+        @click="activeTab = 'text'"
+      >
+        完整正文
+      </button>
+    </div>
+
     <div class="result-body">
       <div v-if="errorMessage" class="error-state">
         <strong>调用失败</strong>
@@ -31,6 +50,15 @@
       <div v-else-if="resultGroups.length === 0" class="empty-state">
         <strong>暂无结果</strong>
         <p>选择图片并开始识别后，这里会显示格式化文本。</p>
+      </div>
+
+      <div v-else-if="activeTab === 'text'" class="full-text-view">
+        <el-input
+          v-model="fullTextModel"
+          type="textarea"
+          placeholder="完整识别结果"
+          class="full-text-input"
+        />
       </div>
 
       <div v-else class="result-list">
@@ -137,6 +165,9 @@ const editingKey = ref<string | null>(null);
 const editingValue = ref("");
 const rawPanelNames = ref<string[]>([]);
 
+const activeTab = ref<"lines" | "text">("lines");
+const editedFullText = ref<string | null>(null);
+
 const resultGroups = computed(() =>
   (props.result?.results || []).map((result) => ({
     result,
@@ -161,8 +192,11 @@ const rawJson = computed(() => {
 
 const hasRawJson = computed(() => Boolean(rawJson.value));
 
-const allText = computed(() =>
-  resultGroups.value
+const allText = computed(() => {
+  if (activeTab.value === "text" && editedFullText.value !== null) {
+    return editedFullText.value;
+  }
+  return resultGroups.value
     .map((group) =>
       group.lines
         .map((line) => getLineText(line.key, line.text).trim())
@@ -170,8 +204,17 @@ const allText = computed(() =>
         .join("\n")
     )
     .filter(Boolean)
-    .join("\n\n")
-);
+    .join("\n\n");
+});
+
+const fullTextModel = computed({
+  get() {
+    return editedFullText.value !== null ? editedFullText.value : allText.value;
+  },
+  set(val: string) {
+    editedFullText.value = val;
+  },
+});
 
 watch(
   () => props.result,
@@ -182,6 +225,8 @@ watch(
     editingKey.value = null;
     editingValue.value = "";
     rawPanelNames.value = [];
+    editedFullText.value = null;
+    activeTab.value = "lines";
   }
 );
 
@@ -304,14 +349,50 @@ function toggleRawJson() {
   flex-shrink: 0;
 }
 
+.view-selector {
+  display: flex;
+  padding: 4px;
+  margin-top: 4px;
+  gap: 4px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--input-bg, transparent) 85%, transparent);
+  flex-shrink: 0;
+}
+
+.selector-btn {
+  flex: 1;
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-color-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.selector-btn:hover {
+  color: var(--text-color);
+  background: color-mix(in srgb, var(--card-bg, white) 45%, transparent);
+}
+
+.selector-btn.active {
+  color: var(--primary-color);
+  background: var(--card-bg);
+  box-shadow: 0 2px 8px color-mix(in srgb, black 8%, transparent);
+}
+
 .result-body {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   flex: 1;
   overflow: hidden;
 }
 
 .result-list {
-  height: 100%;
+  flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -320,6 +401,32 @@ function toggleRawJson() {
   overflow-y: auto;
   padding-right: 2px;
   scrollbar-gutter: stable;
+}
+
+.full-text-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.full-text-input {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.full-text-input :deep(.el-textarea__inner) {
+  flex: 1;
+  resize: none;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--input-bg, transparent) 78%, transparent);
+  border-color: var(--border-color);
+  color: var(--text-color);
 }
 
 .result-group {

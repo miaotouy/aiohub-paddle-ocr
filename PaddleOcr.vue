@@ -187,8 +187,8 @@ async function handleSendToChat(text: string) {
   :deep(.result-panel) {
     width: 100% !important;
     min-width: 0 !important;
-    height: auto !important;
-    min-height: 360px;
+    height: 600px !important;
+    min-height: 400px;
   }
 }
 

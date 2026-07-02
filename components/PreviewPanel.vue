@@ -194,6 +194,13 @@ function isSupportedImagePath(path: string) {
   gap: 14px;
 }
 
+@media (max-width: 1024px) {
+  .preview-panel {
+    min-height: 400px;
+    height: 50vh;
+  }
+}
+
 .preview-panel.dragging {
   border-color: color-mix(in srgb, var(--primary-color) 72%, var(--border-color));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary-color) 55%, transparent);
