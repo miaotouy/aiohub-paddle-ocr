@@ -38,7 +38,14 @@ export default defineConfig({
       formats: ["es"],
     },
     rollupOptions: {
-      external: ["vue", "@tauri-apps/api/core", "aiohub-sdk", "aiohub-ui"],
+      external: [
+        "vue",
+        "@tauri-apps/api/core",
+        "@tauri-apps/api/path",
+        "@tauri-apps/plugin-fs",
+        "aiohub-sdk",
+        "aiohub-ui",
+      ],
       output: {
         codeSplitting: false, // Vite 8 / Rolldown 推荐写法：禁用代码分割，消灭分块 JS，彻底解决相对路径加载问题
         globals: {

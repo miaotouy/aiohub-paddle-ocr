@@ -36,6 +36,7 @@
 - 打包：`bun run package`
 - 清理：`bun run clean`
 - Vue UI 构建时，`vite.config.js` 的 `rollupOptions.output` 需配置 `codeSplitting: false`（Vite 8 / Rolldown 推荐写法），禁用代码分割，消灭分块 JS，彻底解决相对路径加载问题。
+- Vue UI 中使用的 Tauri API / 插件（如 `@tauri-apps/api/core`、`@tauri-apps/api/path`、`@tauri-apps/plugin-fs`）以及 `aiohub-sdk`、`aiohub-ui` 均由宿主运行时提供，必须在 `vite.config.js` 的 `rollupOptions.external` 中显式声明为外部依赖，否则 CI 构建会因 Rolldown 无法在本地 `node_modules` 中解析这些包而失败。
 
 本仓库是独立 Git 仓库，提交、tag 和发布包应在本目录内处理。
 
