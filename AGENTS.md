@@ -35,6 +35,7 @@
 - Vue UI 构建：`bun run build:vue`
 - 打包：`bun run package`
 - 清理：`bun run clean`
+- Vue UI 构建时，`vite.config.js` 的 `rollupOptions.output` 需配置 `codeSplitting: false`（Vite 8 / Rolldown 推荐写法），禁用代码分割，消灭分块 JS，彻底解决相对路径加载问题。
 
 本仓库是独立 Git 仓库，提交、tag 和发布包应在本目录内处理。
 
@@ -47,3 +48,4 @@
 - 模型 profile、方法签名或贡献点变化后，检查 `manifest.json` 与 `src/main.rs` 是否一致。
 - AIO Hub Tauri 真实运行态或宿主插件调用环境主要用于验证 UI 交互、插件发现、贡献点注册、宿主调用链和窗口内反馈；不要把纯后端 OCR 识别正确性绑定到宿主 UI 才能验证。
 - 普通浏览器只能做明确 mock 后的 Vue 外观检查，不能验证 sidecar 协议、宿主插件调用链或真实 Tauri 运行态。
+
