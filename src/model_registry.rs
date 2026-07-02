@@ -7,7 +7,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-const DEFAULT_MODEL_PROFILE: &str = "ppocr-v5-mobile-general";
+const DEFAULT_MODEL_PROFILE: &str = "ppocr-v6-small-onnx";
 const MODEL_ROOT: &str = "models";
 const MODEL_REGISTRY_FILE: &str = "registry.json";
 

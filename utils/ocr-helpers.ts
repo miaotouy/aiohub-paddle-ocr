@@ -29,7 +29,7 @@ export function getManifestProfiles(): ModelRegistryProfile[] {
 
 export function getManifestDefaultProfile(): string {
   const contribution = getOcrContribution();
-  return contribution?.defaultModelProfile || "ppocr-v5-mobile-general";
+  return contribution?.defaultModelProfile || "ppocr-v6-small-onnx";
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
