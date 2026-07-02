@@ -1,13 +1,5 @@
 <template>
   <div class="paddle-ocr">
-    <input
-      ref="imageInput"
-      class="file-input"
-      type="file"
-      accept="image/*"
-      @change="handleLocalFileInput"
-    />
-
     <ImportModelDialog
       v-model:visible="isImportDialogVisible"
       :importing="isImportingModel"
@@ -34,6 +26,7 @@
 
     <div class="main-content">
       <PreviewPanel
+        ref="previewPanelRef"
         :selected-image="selectedImage"
         :is-processing="isProcessing"
         :ocr-lines="previewLines"
@@ -55,480 +48,64 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { customMessage, execute, pluginManager, useSendToChat } from "aiohub-sdk";
+import { onMounted, ref } from "vue";
+import { customMessage, useSendToChat } from "aiohub-sdk";
 import manifest from "./manifest.json";
-import embeddedRegistryJson from "./models/registry.json";
 import ControlPanel from "./components/ControlPanel.vue";
 import ImportModelDialog from "./components/ImportModelDialog.vue";
 import PreviewPanel from "./components/PreviewPanel.vue";
 import ResultPanel from "./components/ResultPanel.vue";
-import type {
-  ImportModelForm,
-  ModelRegistry,
-  ModelRegistryProfile,
-  ModelStatus,
-  PaddleOcrBatchResult,
-  PaddleOcrHealthCheckResult,
-  RuntimeStatus,
-  SelectedOcrImage,
-} from "./components/types";
+import { useModelRegistry } from "./composables/useModelRegistry";
+import { useOcrImage } from "./composables/useOcrImage";
+import { useOcrEngine } from "./composables/useOcrEngine";
 
-const PLUGIN_ID = "paddle-ocr";
-const CUSTOM_REGISTRY_FILE = "custom-registry.json";
-
-const pluginContext = pluginManager.createPluginContext(PLUGIN_ID);
 const version = manifest.version;
-const manifestDefaultProfile = getManifestDefaultProfile();
-const embeddedRegistry = embeddedRegistryJson as ModelRegistry;
 
-const imageInput = ref<HTMLInputElement | null>(null);
-const modelProfiles = ref<ModelRegistryProfile[]>(getManifestProfiles());
-const selectedProfileId = ref(manifestDefaultProfile);
-const registryLoading = ref(false);
-const registryError = ref<string | null>(null);
+// 1. 引入模型清单管理 Composable
+const {
+  modelProfiles,
+  selectedProfileId,
+  registryLoading,
+  registryError,
+  isImportDialogVisible,
+  isImportingModel,
+  loadRegistry,
+  importCustomModel,
+} = useModelRegistry();
 
-const selectedImage = ref<SelectedOcrImage | null>(null);
-const runtimeStatus = ref<RuntimeStatus>("idle");
-const modelStatus = ref<ModelStatus>("unknown");
-const lastDurationMs = ref<number | null>(null);
-const lastResult = ref<PaddleOcrBatchResult | null>(null);
-const lastRawResult = ref<unknown | null>(null);
-const lastError = ref<string | null>(null);
+// 2. 引入图片管理 Composable
+const {
+  selectedImage,
+  handleImageFile,
+  handleImagePath,
+  clearImage,
+} = useOcrImage();
 
-const isChecking = ref(false);
-const isProcessing = ref(false);
-const isImportDialogVisible = ref(false);
-const isImportingModel = ref(false);
+// 3. 引入 OCR 引擎 Composable
+const {
+  runtimeStatus,
+  modelStatus,
+  lastDurationMs,
+  lastResult,
+  lastRawResult,
+  lastError,
+  isChecking,
+  isProcessing,
+  previewLines,
+  checkRuntime,
+  runOcr,
+} = useOcrEngine(selectedProfileId, selectedImage);
+
 const { sendToChat } = useSendToChat();
-
-const previewLines = computed(() => {
-  const imageId = selectedImage.value?.id;
-  if (!imageId) return [];
-  return (
-    lastResult.value?.results?.find((result) => result.imageId === imageId)?.lines || []
-  );
-});
+const previewPanelRef = ref<InstanceType<typeof PreviewPanel> | null>(null);
 
 onMounted(async () => {
   await loadRegistry();
 });
 
-async function loadRegistry() {
-  registryLoading.value = true;
-  registryError.value = null;
-
-  let builtInProfiles = embeddedRegistry.profiles || getManifestProfiles();
-  let defaultProfile = embeddedRegistry.defaultProfile || manifestDefaultProfile;
-  const installRegistry = await loadInstallRegistry();
-  if (installRegistry) {
-    builtInProfiles = installRegistry.profiles || builtInProfiles;
-    defaultProfile = installRegistry.defaultProfile || defaultProfile;
-  }
-
-  let customProfiles: ModelRegistryProfile[] = [];
-  try {
-    if (await pluginContext.storage.exists(CUSTOM_REGISTRY_FILE)) {
-      const content = await pluginContext.storage.readText(CUSTOM_REGISTRY_FILE);
-      const customRegistry = JSON.parse(content) as ModelRegistry;
-      customProfiles = customRegistry.profiles || [];
-    }
-  } catch (error) {
-    const message = `自定义模型清单读取失败：${toErrorMessage(error)}`;
-    registryError.value = registryError.value ? `${registryError.value}；${message}` : message;
-  } finally {
-    registryLoading.value = false;
-  }
-
-  const mergedProfiles = mergeProfiles(builtInProfiles, customProfiles);
-  modelProfiles.value = mergedProfiles.length > 0 ? mergedProfiles : getManifestProfiles();
-
-  const hasSelected = modelProfiles.value.some(
-    (profile) => profile.id === selectedProfileId.value
-  );
-  if (!hasSelected) {
-    selectedProfileId.value =
-      modelProfiles.value.find((profile) => profile.id === defaultProfile)?.id ||
-      modelProfiles.value[0]?.id ||
-      defaultProfile;
-  }
-}
-
-async function loadInstallRegistry() {
-  try {
-    const plugin =
-      pluginManager.getPlugin(`${PLUGIN_ID}-dev`) || pluginManager.getPlugin(PLUGIN_ID);
-    const installPath = plugin?.installPath;
-    if (!installPath) return null;
-
-    const { join } = await import("@tauri-apps/api/path");
-    const fs = await import("@tauri-apps/plugin-fs");
-    const registryPath = await join(installPath, "models", "registry.json");
-
-    if (!(await fs.exists(registryPath))) {
-      return null;
-    }
-
-    const content = await fs.readTextFile(registryPath);
-    try {
-      return JSON.parse(content) as ModelRegistry;
-    } catch (error) {
-      registryError.value = `内置模型清单解析失败，已使用内嵌清单：${toErrorMessage(error)}`;
-      return null;
-    }
-  } catch {
-    return null;
-  }
-}
-
-function mergeProfiles(
-  builtInProfiles: ModelRegistryProfile[],
-  customProfiles: ModelRegistryProfile[]
-) {
-  const merged: ModelRegistryProfile[] = [];
-  const seenIds = new Set<string>();
-
-  for (const profile of [...builtInProfiles, ...customProfiles]) {
-    const id = profile.id?.trim();
-    if (!id) continue;
-    const key = id.toLowerCase();
-    if (seenIds.has(key)) continue;
-    seenIds.add(key);
-    merged.push(profile);
-  }
-
-  return merged;
-}
-
-async function importCustomModel(formData: ImportModelForm) {
-  isImportingModel.value = true;
-  try {
-    const { join } = await import("@tauri-apps/api/path");
-    const fs = await import("@tauri-apps/plugin-fs");
-    const storage = pluginContext.storage;
-    const modelId = createCustomModelId(formData.modelName);
-    const targetModelDir = `custom-models/${modelId}`;
-    const dataDir = await storage.getDataDir();
-    const absoluteModelDir = await join(dataDir, "custom-models", modelId);
-
-    await fs.mkdir(absoluteModelDir, { recursive: true });
-
-    const normalizedFiles = getModelFilesToCopy(formData);
-    for (const relativeFile of normalizedFiles) {
-      const sourcePath = await join(formData.modelDir, ...relativeFile.split("/"));
-      const targetDirParts = relativeFile.split("/").slice(0, -1);
-      if (targetDirParts.length > 0) {
-        const targetSubDir = await join(absoluteModelDir, ...targetDirParts);
-        await fs.mkdir(targetSubDir, { recursive: true });
-      }
-      const data = await fs.readFile(sourcePath);
-      await storage.writeBinary(`${targetModelDir}/${relativeFile}`, data);
-    }
-
-    const customProfile = buildCustomProfile(
-      modelId,
-      formData,
-      absoluteModelDir.replace(/\\/g, "/")
-    );
-    await appendCustomProfile(customProfile);
-    await loadRegistry();
-
-    selectedProfileId.value = customProfile.id;
-    isImportDialogVisible.value = false;
-    customMessage.success(`自定义模型 "${customProfile.name}" 导入成功`);
-  } catch (error) {
-    customMessage.error(`导入自定义模型失败：${toErrorMessage(error)}`);
-  } finally {
-    isImportingModel.value = false;
-  }
-}
-
-function getModelFilesToCopy(formData: ImportModelForm) {
-  const files =
-    formData.backend === "mnn-ocr-rs"
-      ? [formData.detModel, formData.recModel, formData.dict]
-      : [
-          formData.detOnnx,
-          formData.recOnnx,
-          formData.detConfig,
-          formData.recConfig,
-          formData.dict,
-        ];
-
-  return Array.from(
-    new Set(
-      files
-        .filter((file): file is string => Boolean(file))
-        .map((file) => normalizeRelativePath(file))
-    )
-  );
-}
-
-function buildCustomProfile(
-  id: string,
-  formData: ImportModelForm,
-  absoluteModelDir: string
-): ModelRegistryProfile {
-  const profile: ModelRegistryProfile = {
-    id,
-    name: formData.modelName.trim(),
-    backend: formData.backend,
-    language: formData.language.trim() || "custom",
-    modelDir: absoluteModelDir,
-    aliases: [id],
-    builtIn: false,
-    package: false,
-    experimental: false,
-  };
-
-  if (formData.backend === "mnn-ocr-rs") {
-    profile.detModel = normalizeRelativePath(formData.detModel);
-    profile.recModel = normalizeRelativePath(formData.recModel);
-    profile.dict = normalizeRelativePath(formData.dict);
-  } else {
-    profile.detOnnx = normalizeRelativePath(formData.detOnnx);
-    profile.recOnnx = normalizeRelativePath(formData.recOnnx);
-    profile.detConfig = normalizeRelativePath(formData.detConfig);
-    profile.recConfig = normalizeRelativePath(formData.recConfig);
-    if (formData.dict) {
-      profile.dict = normalizeRelativePath(formData.dict);
-    }
-  }
-
-  return profile;
-}
-
-async function appendCustomProfile(profile: ModelRegistryProfile) {
-  const storage = pluginContext.storage;
-  let registry: ModelRegistry = {
-    schemaVersion: 1,
-    defaultProfile: "",
-    profiles: [],
-  };
-
-  if (await storage.exists(CUSTOM_REGISTRY_FILE)) {
-    try {
-      registry = JSON.parse(await storage.readText(CUSTOM_REGISTRY_FILE)) as ModelRegistry;
-    } catch {
-      registry = {
-        schemaVersion: 1,
-        defaultProfile: "",
-        profiles: [],
-      };
-    }
-  }
-
-  registry.schemaVersion = 1;
-  registry.defaultProfile = registry.defaultProfile || "";
-  registry.profiles = (registry.profiles || []).filter(
-    (item) => item.id.toLowerCase() !== profile.id.toLowerCase()
-  );
-  registry.profiles.push(profile);
-
-  await storage.writeText(CUSTOM_REGISTRY_FILE, `${JSON.stringify(registry, null, 2)}\n`);
-}
-
-function normalizeRelativePath(filePath?: string) {
-  const normalized = (filePath || "").replace(/\\/g, "/").replace(/^\/+/, "").trim();
-  if (!normalized) {
-    throw new Error("模型文件路径为空");
-  }
-  if (normalized.split("/").some((segment) => segment === ".." || segment === "")) {
-    throw new Error(`模型文件路径无效: ${filePath}`);
-  }
-  return normalized;
-}
-
-function createCustomModelId(modelName: string) {
-  const slug =
-    modelName
-      .trim()
-      .toLowerCase()
-      .normalize("NFKD")
-      .replace(/[^a-z0-9_-]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 48) || "model";
-  return `custom-${Date.now()}-${slug}`;
-}
-
+// 核心优化：通过 ref 触发 PreviewPanel 内部的 openFileDialog，消灭重复的隐藏 input
 function selectImage() {
-  imageInput.value?.click();
-}
-
-function handleLocalFileInput(event: Event) {
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (file) {
-    handleImageFile(file);
-  }
-  input.value = "";
-}
-
-async function handleImageFile(file: File) {
-  if (!file.type.startsWith("image/")) {
-    customMessage.warning("请选择图片文件");
-    return;
-  }
-
-  try {
-    selectedImage.value = {
-      id: `image-${Date.now()}`,
-      name: file.name,
-      dataUrl: await readBlobAsDataUrl(file),
-    };
-    lastResult.value = null;
-    lastRawResult.value = null;
-    lastError.value = null;
-    customMessage.success("图片已载入");
-  } catch (error) {
-    customMessage.error(toErrorMessage(error));
-  }
-}
-
-async function handleImagePath(path: string) {
-  try {
-    selectedImage.value = {
-      id: `image-${Date.now()}`,
-      name: getFileNameFromPath(path),
-      path,
-      dataUrl: await readPathAsDataUrl(path),
-    };
-    lastResult.value = null;
-    lastRawResult.value = null;
-    lastError.value = null;
-    customMessage.success("图片已载入");
-  } catch (error) {
-    customMessage.error(`读取图片失败：${toErrorMessage(error)}`);
-  }
-}
-
-function clearImage() {
-  selectedImage.value = null;
-  lastResult.value = null;
-  lastRawResult.value = null;
-  lastError.value = null;
-}
-
-async function callRecognizeBatch(images: unknown[]) {
-  const startedAt = performance.now();
-  try {
-    lastRawResult.value = null;
-    const response = (await execute({
-      service: PLUGIN_ID,
-      method: "recognizeBatch",
-      params: {
-        images,
-        options: {
-          modelProfile: selectedProfileId.value,
-        },
-      },
-    })) as unknown;
-
-    lastRawResult.value = response;
-    const result = normalizeRecognizeBatchResponse(response);
-    lastResult.value = result;
-    lastError.value = null;
-    return result;
-  } finally {
-    lastDurationMs.value = performance.now() - startedAt;
-  }
-}
-
-async function callHealthCheck(): Promise<PaddleOcrHealthCheckResult> {
-  const startedAt = performance.now();
-  try {
-    lastRawResult.value = null;
-    lastResult.value = null;
-    const response = (await execute({
-      service: PLUGIN_ID,
-      method: "healthCheck",
-      params: {
-        options: {
-          modelProfile: selectedProfileId.value,
-        },
-      },
-    })) as unknown;
-
-    lastRawResult.value = response;
-    lastError.value = null;
-    return normalizeHealthCheckResponse(response);
-  } finally {
-    lastDurationMs.value = performance.now() - startedAt;
-  }
-}
-
-function updateStatusFromError(error: unknown) {
-  runtimeStatus.value = "error";
-  const message = toErrorMessage(error);
-  lastResult.value = null;
-  lastError.value = message;
-
-  if (
-    message.includes("模型目录缺失") ||
-    message.includes("模型文件缺失") ||
-    message.includes("模型文件为空") ||
-    message.includes("模型 registry 无效") ||
-    message.includes("不支持的模型 profile") ||
-    message.includes("ONNX Runtime 动态库缺失")
-  ) {
-    modelStatus.value = "missing";
-  }
-}
-
-async function checkRuntime() {
-  isChecking.value = true;
-  try {
-    await callHealthCheck();
-    runtimeStatus.value = "ready";
-    modelStatus.value = "ready";
-    customMessage.success("Paddle OCR 健康检查通过");
-  } catch (error) {
-    updateStatusFromError(error);
-    customMessage.error("Paddle OCR 检查失败");
-  } finally {
-    isChecking.value = false;
-  }
-}
-
-async function runOcr() {
-  if (!selectedImage.value) {
-    customMessage.warning("请先选择一张图片");
-    return;
-  }
-
-  isProcessing.value = true;
-  try {
-    const image = selectedImage.value;
-    const requestImage = image.path
-      ? {
-          blockId: `block-${image.id}`,
-          imageId: image.id,
-          path: image.path,
-          dataUrl: image.dataUrl,
-        }
-      : {
-          blockId: `block-${image.id}`,
-          imageId: image.id,
-          dataUrl: image.dataUrl,
-        };
-    const result = await callRecognizeBatch([
-      requestImage,
-    ]);
-    runtimeStatus.value = "ready";
-    modelStatus.value = "ready";
-
-    const first = result.results?.[0];
-    if (first?.status === "error") {
-      customMessage.warning(first.error || "图片未完成识别");
-    } else {
-      customMessage.success("识别完成");
-    }
-  } catch (error) {
-    updateStatusFromError(error);
-    customMessage.error("识别调用失败");
-  } finally {
-    isProcessing.value = false;
-  }
+  previewPanelRef.value?.openFileDialog();
 }
 
 async function handleSendToChat(text: string) {
@@ -551,156 +128,6 @@ async function handleSendToChat(text: string) {
     customMessage.error("发送到聊天失败，复制也未成功");
   }
 }
-
-async function readPathAsDataUrl(path: string) {
-  const fs = await import("@tauri-apps/plugin-fs");
-  const data = await fs.readFile(path);
-  const blob = new Blob([data], { type: inferImageMimeType(path) });
-  return readBlobAsDataUrl(blob);
-}
-
-function readBlobAsDataUrl(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-      } else {
-        reject(new Error("图片读取结果无效"));
-      }
-    };
-    reader.onerror = () => reject(reader.error || new Error("图片读取失败"));
-    reader.readAsDataURL(blob);
-  });
-}
-
-function getFileNameFromPath(path: string) {
-  return path.split(/[\\/]/).filter(Boolean).pop() || "本地图片";
-}
-
-function inferImageMimeType(path: string) {
-  const lower = path.toLowerCase();
-  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-  if (lower.endsWith(".webp")) return "image/webp";
-  if (lower.endsWith(".gif")) return "image/gif";
-  if (lower.endsWith(".bmp")) return "image/bmp";
-  return "image/png";
-}
-
-function getManifestProfiles() {
-  const contribution = getOcrContribution();
-  return ((contribution?.modelProfiles || embeddedRegistry.profiles || []) as ModelRegistryProfile[]).map((profile) => ({
-    ...profile,
-  }));
-}
-
-function getManifestDefaultProfile() {
-  const contribution = getOcrContribution();
-  return contribution?.defaultModelProfile || "ppocr-v5-mobile-general";
-}
-
-function getOcrContribution() {
-  return (manifest.contributions || []).find(
-    (contribution: { type?: string }) => contribution.type === "ocr-engine"
-  ) as
-    | {
-        defaultModelProfile?: string;
-        modelProfiles?: ModelRegistryProfile[];
-      }
-    | undefined;
-}
-
-function normalizeRecognizeBatchResponse(response: unknown): PaddleOcrBatchResult {
-  const directResult = readBatchResult(response);
-  if (directResult) {
-    return directResult;
-  }
-
-  if (isRecord(response)) {
-    if (response.success === false) {
-      throw new Error(readEnvelopeError(response) || "OCR 调用返回失败");
-    }
-
-    const dataResult = readBatchResult(response.data);
-    if (dataResult) {
-      return dataResult;
-    }
-  }
-
-  throw new Error("OCR 返回结构异常：未找到 results 或 data.results");
-}
-
-function normalizeHealthCheckResponse(response: unknown): PaddleOcrHealthCheckResult {
-  const directResult = readHealthCheckResult(response);
-  if (directResult) {
-    return directResult;
-  }
-
-  if (isRecord(response)) {
-    if (response.success === false) {
-      throw new Error(readEnvelopeError(response) || "健康检查返回失败");
-    }
-
-    const dataResult = readHealthCheckResult(response.data);
-    if (dataResult) {
-      return dataResult;
-    }
-  }
-
-  throw new Error("健康检查返回结构异常：未找到 ready/status");
-}
-
-function readHealthCheckResult(value: unknown): PaddleOcrHealthCheckResult | null {
-  if (!isRecord(value) || value.ready !== true || typeof value.status !== "string") {
-    return null;
-  }
-
-  return {
-    ready: value.ready,
-    status: value.status,
-    backend: typeof value.backend === "string" ? value.backend : "",
-    profile: typeof value.profile === "string" ? value.profile : "",
-    profileName: typeof value.profileName === "string" ? value.profileName : "",
-    modelFiles: typeof value.modelFiles === "string" ? value.modelFiles : "",
-  };
-}
-
-function readBatchResult(value: unknown): PaddleOcrBatchResult | null {
-  if (!isRecord(value) || !Array.isArray(value.results)) {
-    return null;
-  }
-
-  return {
-    results: value.results as PaddleOcrBatchResult["results"],
-  };
-}
-
-function readEnvelopeError(response: Record<string, unknown>) {
-  const candidates = [response.error, response.message, response.data];
-
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate;
-    }
-
-    if (isRecord(candidate)) {
-      const nested = candidate.message || candidate.error;
-      if (typeof nested === "string" && nested.trim()) {
-        return nested;
-      }
-    }
-  }
-
-  return "";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function toErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 </script>
 
 <style scoped>
@@ -719,10 +146,6 @@ function toErrorMessage(error: unknown) {
 
 .paddle-ocr * {
   box-sizing: border-box;
-}
-
-.file-input {
-  display: none;
 }
 
 .main-content {

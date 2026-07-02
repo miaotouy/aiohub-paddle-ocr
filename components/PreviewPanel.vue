@@ -158,6 +158,10 @@ function openFileDialog() {
   fileInput.value?.click();
 }
 
+defineExpose({
+  openFileDialog,
+});
+
 function updateNaturalSize() {
   const image = imageRef.value;
   naturalSize.value = {
