@@ -115,6 +115,20 @@ function requireProfileFile(profile, fieldName) {
   return value;
 }
 
+function getOnnxRuntimeLibraryPath(platform) {
+  const platformMap = {
+    'windows-x64': { dir: 'windows-x64', file: 'onnxruntime.dll' },
+    'windows-arm64': { dir: 'windows-arm64', file: 'onnxruntime.dll' },
+    'macos-x64': { dir: 'macos-x64', file: 'libonnxruntime.dylib' },
+    'macos-arm64': { dir: 'macos-arm64', file: 'libonnxruntime.dylib' },
+    'linux-x64': { dir: 'linux-x64', file: 'libonnxruntime.so' },
+    'linux-arm64': { dir: 'linux-arm64', file: 'libonnxruntime.so' }
+  };
+  const info = platformMap[platform];
+  if (!info) return null;
+  return `runtime/onnxruntime/${info.dir}/${info.file}`;
+}
+
 function getRequiredModelFiles(profile) {
   const modelDir = requireProfileFile(profile, 'modelDir');
 
@@ -131,7 +145,9 @@ function getRequiredModelFiles(profile) {
       registryPath(modelDir, requireProfileFile(profile, 'detOnnx')),
       registryPath(modelDir, requireProfileFile(profile, 'recOnnx')),
       registryPath(modelDir, requireProfileFile(profile, 'detConfig')),
-      registryPath(modelDir, requireProfileFile(profile, 'recConfig'))
+      registryPath(modelDir, requireProfileFile(profile, 'recConfig')),
+      registryPath(modelDir, requireProfileFile(profile, 'detConfig').replace(/\.yml$/, '.json')),
+      registryPath(modelDir, requireProfileFile(profile, 'recConfig').replace(/\.yml$/, '.json'))
     ];
     if (profile.dict) {
       files.push(registryPath(modelDir, profile.dict));
@@ -313,6 +329,16 @@ function packagePlugin() {
 
   fs.copyFileSync(binaryPath, path.join(binDir, target.packageExecutable));
   console.log(`复制 sidecar -> bin/${target.packageExecutable}`);
+
+  // 复制 ONNX Runtime 动态库
+  const ortLibPath = getOnnxRuntimeLibraryPath(targetPlatform);
+  if (ortLibPath) {
+    if (copyIfExistsPreservingPath(ortLibPath, distDir)) {
+      console.log(`复制 ONNX Runtime 动态库 -> ${ortLibPath}`);
+    } else {
+      console.warn(`警告: 未找到 ONNX Runtime 动态库 -> ${ortLibPath}`);
+    }
+  }
 
   if (shouldPackage) {
     copyModelMetadata(distDir);
