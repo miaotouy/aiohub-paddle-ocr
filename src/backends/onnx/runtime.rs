@@ -28,20 +28,46 @@ pub(super) fn initialize_onnx_runtime(runtime_path: &Path) -> Result<(), Sidecar
 
 pub(super) fn load_onnx_session(model_path: &Path, role: &str) -> Result<Session, SidecarError> {
     with_native_stdout_suppressed(|| {
+        use ort::ep::{ExecutionProvider, CUDA};
+
+        // 1. 尝试使用 CUDA 创建 Session
+        if let Ok(true) = CUDA::default().is_available() {
+            let provider = CUDA::default().with_device_id(0).build();
+            if let Ok(builder) = Session::builder() {
+                if let Ok(mut builder) = builder.with_execution_providers([provider]) {
+                    if let Ok(session) = builder.commit_from_file(model_path) {
+                        eprintln!("[PADDLE_OCR] {} 成功启用 CUDA GPU 加速", role);
+                        return Ok(session);
+                    }
+                }
+            }
+            eprintln!("[PADDLE_OCR] {} 启用 CUDA 失败，正在回退到 CPU...", role);
+        } else {
+            eprintln!(
+                "[PADDLE_OCR] {} 未检测到 CUDA 或 CUDA 不可用，使用 CPU 运行",
+                role
+            );
+        }
+
+        // 2. 回退到 CPU 创建 Session
         let mut builder = Session::builder().map_err(|error| {
             SidecarError::OnnxSessionLoadFailed(format!(
                 "{} session builder 初始化失败: {}",
                 role, error
             ))
         })?;
-        builder.commit_from_file(model_path).map_err(|error| {
+
+        let session = builder.commit_from_file(model_path).map_err(|error| {
             SidecarError::OnnxSessionLoadFailed(format!(
                 "{} 模型 {} 加载失败: {}",
                 role,
                 model_path.display(),
                 error
             ))
-        })
+        })?;
+
+        eprintln!("[PADDLE_OCR] {} 成功创建 CPU Session", role);
+        Ok(session)
     })
 }
 

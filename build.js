@@ -72,6 +72,7 @@ const CURRENT_TARGET_KEY = `${CURRENT_PLATFORM}-${CURRENT_ARCH}`;
 const args = process.argv.slice(2);
 const isRelease = args.includes('--release');
 const shouldPackage = args.includes('--package');
+const isGpu = args.includes('--gpu');
 const mode = isRelease ? 'release' : 'debug';
 const targetArg = args.find((arg) => arg.startsWith('--target='));
 const targetPlatform = targetArg ? targetArg.split('=')[1] : CURRENT_TARGET_KEY;
@@ -114,20 +115,108 @@ function requireProfileFile(profile, fieldName) {
   }
   return value;
 }
-
-function getOnnxRuntimeLibraryPath(platform) {
+function getOnnxRuntimeLibraryFiles(platform) {
   const platformMap = {
-    'windows-x64': { dir: 'windows-x64', file: 'onnxruntime.dll' },
-    'windows-arm64': { dir: 'windows-arm64', file: 'onnxruntime.dll' },
-    'macos-x64': { dir: 'macos-x64', file: 'libonnxruntime.dylib' },
-    'macos-arm64': { dir: 'macos-arm64', file: 'libonnxruntime.dylib' },
-    'linux-x64': { dir: 'linux-x64', file: 'libonnxruntime.so' },
-    'linux-arm64': { dir: 'linux-arm64', file: 'libonnxruntime.so' }
+    'windows-x64': {
+      dir: 'windows-x64',
+      files: isGpu
+        ? ['onnxruntime.dll', 'onnxruntime_providers_cuda.dll', 'onnxruntime_providers_shared.dll']
+        : ['onnxruntime.dll']
+    },
+    'windows-arm64': { dir: 'windows-arm64', files: ['onnxruntime.dll'] },
+    'macos-x64': { dir: 'macos-x64', files: ['libonnxruntime.dylib'] },
+    'macos-arm64': { dir: 'macos-arm64', files: ['libonnxruntime.dylib'] },
+    'linux-x64': {
+      dir: 'linux-x64',
+      files: isGpu
+        ? ['libonnxruntime.so', 'libonnxruntime_providers_cuda.so', 'libonnxruntime_providers_shared.so']
+        : ['libonnxruntime.so']
+    },
+    'linux-arm64': { dir: 'linux-arm64', files: ['libonnxruntime.so'] }
   };
   const info = platformMap[platform];
-  if (!info) return null;
-  return `runtime/onnxruntime/${info.dir}/${info.file}`;
+  if (!info) return [];
+  return info.files.map(file => `runtime/onnxruntime/${info.dir}/${file}`);
 }
+
+async function ensureOnnxRuntimeLibraries(platform) {
+  const files = getOnnxRuntimeLibraryFiles(platform);
+  const missingFiles = files.filter(file => !fs.existsSync(path.join(__dirname, file)));
+  
+  if (missingFiles.length === 0) {
+    console.log('ONNX Runtime 依赖库已完整，无需下载。');
+    return;
+  }
+
+  console.log(`检测到缺失 ONNX Runtime 依赖库: ${missingFiles.join(', ')}，开始自动下载...`);
+  
+  const ORT_VERSION = '1.27.0';
+  const runtimeDir = path.join(__dirname, 'runtime');
+  const tempZip = path.join(runtimeDir, 'ort-temp.zip');
+  const tempExtract = path.join(runtimeDir, 'ort-temp-extract');
+
+  ensureDir(runtimeDir);
+
+  let url = '';
+  let archiveName = '';
+
+  if (platform === 'windows-x64') {
+    if (isGpu) {
+      archiveName = `onnxruntime-win-x64-gpu_cuda12-${ORT_VERSION}`;
+    } else {
+      archiveName = `onnxruntime-win-x64-${ORT_VERSION}`;
+    }
+    url = `https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/${archiveName}.zip`;
+  } else {
+    console.warn(`暂不支持自动下载非 windows-x64 平台的 ONNX Runtime 库，请手动放置。`);
+    return;
+  }
+
+  console.log(`正在下载: ${url}`);
+  const response = await fetch(url, { redirect: 'follow' });
+  if (!response.ok) {
+    throw new Error(`下载 ONNX Runtime 失败: ${response.status} ${response.statusText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  fs.writeFileSync(tempZip, buffer);
+  console.log('下载完成，正在解压...');
+
+  if (fs.existsSync(tempExtract)) {
+    fs.rmSync(tempExtract, { recursive: true, force: true });
+  }
+  ensureDir(tempExtract);
+
+  if (process.platform === 'win32') {
+    execSync(`powershell -Command "Expand-Archive -Path '${tempZip}' -DestinationPath '${tempExtract}' -Force"`);
+  } else {
+    execSync(`unzip -q "${tempZip}" -d "${tempExtract}"`);
+  }
+
+  console.log('正在整理并复制所需的 DLL 文件...');
+  const libDir = path.join(tempExtract, archiveName, 'lib');
+  const targetPlatformDir = path.join(runtimeDir, 'onnxruntime', 'windows-x64');
+  ensureDir(targetPlatformDir);
+
+  const filesToCopy = isGpu
+    ? ['onnxruntime.dll', 'onnxruntime_providers_cuda.dll', 'onnxruntime_providers_shared.dll']
+    : ['onnxruntime.dll'];
+
+  for (const file of filesToCopy) {
+    const src = path.join(libDir, file);
+    const dest = path.join(targetPlatformDir, file);
+    if (fs.existsSync(src)) {
+      fs.copyFileSync(src, dest);
+      console.log(`已部署: ${file}`);
+    }
+  }
+
+  console.log('清理临时文件...');
+  fs.rmSync(tempZip, { force: true });
+  fs.rmSync(tempExtract, { recursive: true, force: true });
+  console.log('ONNX Runtime 依赖库部署成功！');
+}
+
 
 function getRequiredModelFiles(profile) {
   const modelDir = requireProfileFile(profile, 'modelDir');
@@ -331,12 +420,15 @@ function packagePlugin() {
   console.log(`复制 sidecar -> bin/${target.packageExecutable}`);
 
   // 复制 ONNX Runtime 动态库
-  const ortLibPath = getOnnxRuntimeLibraryPath(targetPlatform);
-  if (ortLibPath) {
+  const ortLibPaths = getOnnxRuntimeLibraryFiles(targetPlatform);
+  for (const ortLibPath of ortLibPaths) {
     if (copyIfExistsPreservingPath(ortLibPath, distDir)) {
       console.log(`复制 ONNX Runtime 动态库 -> ${ortLibPath}`);
     } else {
-      console.warn(`警告: 未找到 ONNX Runtime 动态库 -> ${ortLibPath}`);
+      // 只有主库找不到时才报警告，插件库找不到（比如用户只用 CPU 版）就不报警告了
+      if (ortLibPath.endsWith('onnxruntime.dll') || ortLibPath.endsWith('libonnxruntime.dylib') || ortLibPath.endsWith('libonnxruntime.so')) {
+        console.warn(`警告: 未找到 ONNX Runtime 动态库 -> ${ortLibPath}`);
+      }
     }
   }
 
@@ -381,7 +473,8 @@ async function createZipArchive(distDir) {
   console.log('创建 ZIP 发布包...');
 
   const manifest = readJson(path.join(distDir, 'manifest.json'));
-  const zipFileName = `${manifest.id}-v${manifest.version}-${targetPlatform}.zip`;
+  const suffix = isGpu ? '-gpu' : '-cpu';
+  const zipFileName = `${manifest.id}-v${manifest.version}-${targetPlatform}${suffix}.zip`;
   const zipPath = path.join(__dirname, zipFileName);
 
   removeIfExists(zipPath);
@@ -403,7 +496,6 @@ async function createZipArchive(distDir) {
     archive.finalize();
   });
 }
-
 async function main() {
   console.log('清理旧产物...');
   removeIfExists(path.join(__dirname, 'dist'));
@@ -415,6 +507,11 @@ async function main() {
   }
   console.log('清理完成');
   console.log('');
+
+  // 确保 ONNX Runtime 依赖库存在（如果需要打包）
+  if (shouldPackage) {
+    await ensureOnnxRuntimeLibraries(targetPlatform);
+  }
 
   buildVueComponent();
   buildTarget(targetPlatform);
