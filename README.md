@@ -1,16 +1,19 @@
-# AIO Hub Paddle OCR 插件
+# AIO Hub Paddle OCR 引擎与插件
 
-AIO Hub Paddle OCR 是面向 AIO Hub Smart OCR 的本地离线 OCR sidecar 插件。插件通过独立进程加载 PP-OCRv6 ONNX 模型或 PP-OCRv5 MNN 模型，并向主应用暴露统一的批量识别方法，用于在 Smart OCR 中处理图片块、截图块和其他图像输入。
+AIO Hub Paddle OCR 是一个高性能、本地离线的通用 OCR 引擎与 AIO Hub 插件。它内置了完整的 PaddleOCR 运行时流水线，支持 **ONNX Runtime** 与 **MNN** 双推理后端，并自带轻量化与高精度 Paddle 模型。
+
+本项目不仅作为 AIO Hub Smart OCR 的核心常驻引擎，更被设计为一个**通用的本地 OCR 服务节点**。任何其他 AIO Hub 插件、主应用模块或外部程序，均可通过对齐其极简的 JSON-RPC 接口（基于标准输入输出 stdin/stdout）直接拉起并调用该引擎，实现低延迟的批量图片识别。
 
 本插件支持内置的 PP-OCRv6 ONNX 与 PP-OCRv5 Mobile 模型，并提供**双注册表动态合并方案**，允许用户在管理界面中**一键扫描并导入自定义模型**（支持 MNN 与 ONNX 运行时）。
 
-## 项目状态
+## 项目状态与定位
 
+- **定位**：通用本地离线 OCR 引擎 / AIO Hub 常驻 Sidecar 插件
 - **插件 ID**：`paddle-ocr`
 - **插件类型**：`sidecar` (常驻 OCR 引擎：`resident: true`)
+- **核心后端**：ONNX Runtime (默认, PP-OCRv6) & MNN (PP-OCRv5)
 - **支持方法**：`healthCheck`、`recognizeBatch`、`shutdown`
-- **默认模型**：`ppocr-v6-small-onnx` (PP-OCRv6 Small ONNX)
-- **Smart OCR 扩展**：通过 `manifest.json` 的 `contributions[]` 声明 `type: "ocr-engine"`
+- **接口协议**：标准单行 JSON-RPC (stdin/stdout)，支持跨语言、跨插件无缝对齐调用
 - **前端 UI**：基于 Vue 3 + Element Plus + Tailwind CSS 的现代毛玻璃三栏式管理页，支持图片拖拽/粘贴预览、文本框坐标叠加绘制、识别结果单行自治编辑、复制与发送到聊天。
 
 ---
