@@ -1,5 +1,6 @@
 /target/
 /dist/
+.env
 /dist-ui/
 /node_modules/
 /bun.lockb

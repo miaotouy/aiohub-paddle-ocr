@@ -21,11 +21,6 @@ jobs:
           - package-target: windows-x64
             rust-target: x86_64-pc-windows-msvc
             os: windows-latest
-            gpu: false
-          - package-target: windows-x64
-            rust-target: x86_64-pc-windows-msvc
-            os: windows-latest
-            gpu: true
 
     steps:
       - name: Checkout
@@ -98,18 +93,21 @@ jobs:
 
           Get-ChildItem -Path "models/ppocr-v5-mobile" -File
 
+      - name: Download ONNX Runtime libraries
+        shell: pwsh
+        run: |
+          bun run download-ort --variant=cpu
+          bun run download-ort --variant=gpu-cuda12
+          bun run download-ort --variant=gpu-cuda13
+
       - name: Package plugin
         shell: pwsh
         run: |
-          if ("${{ matrix.gpu }}" -eq "true") {
-            bun build.js --release --package --target=${{ matrix.package-target }} --gpu
-          } else {
-            bun build.js --release --package --target=${{ matrix.package-target }}
-          }
+          bun build.js --release --package --target=${{ matrix.package-target }} --variant=all
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: paddle-ocr-test-build-${{ matrix.package-target }}-${{ matrix.gpu && 'gpu' || 'cpu' }}
-          path: paddle-ocr-v*-${{ matrix.package-target }}-*.zip
+          name: paddle-ocr-test-build-${{ matrix.package-target }}
+          path: aiohub-paddle-ocr-v*-${{ matrix.package-target }}-*.zip
           if-no-files-found: error

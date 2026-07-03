@@ -24,11 +24,6 @@ jobs:
           - package-target: windows-x64
             rust-target: x86_64-pc-windows-msvc
             os: windows-latest
-            gpu: false
-          - package-target: windows-x64
-            rust-target: x86_64-pc-windows-msvc
-            os: windows-latest
-            gpu: true
 
     steps:
       - name: Checkout
@@ -101,20 +96,23 @@ jobs:
 
           Get-ChildItem -Path "models/ppocr-v5-mobile" -File
 
+      - name: Download ONNX Runtime libraries
+        shell: pwsh
+        run: |
+          bun run download-ort --variant=cpu
+          bun run download-ort --variant=gpu-cuda12
+          bun run download-ort --variant=gpu-cuda13
+
       - name: Package plugin
         shell: pwsh
         run: |
-          if ("${{ matrix.gpu }}" -eq "true") {
-            bun build.js --release --package --target=${{ matrix.package-target }} --gpu
-          } else {
-            bun build.js --release --package --target=${{ matrix.package-target }}
-          }
+          bun build.js --release --package --target=${{ matrix.package-target }} --variant=all
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: paddle-ocr-${{ matrix.package-target }}-${{ matrix.gpu && 'gpu' || 'cpu' }}
-          path: paddle-ocr-v*-${{ matrix.package-target }}-*.zip
+          name: paddle-ocr-${{ matrix.package-target }}
+          path: aiohub-paddle-ocr-v*-${{ matrix.package-target }}-*.zip
           if-no-files-found: error
 
   release:
@@ -179,15 +177,16 @@ jobs:
             - Commit: `${{ github.sha }}`
 
             ### 检查清单
-            - 确认 CPU 和 GPU 版本的 Windows x64 ZIP 都已上传。
+            - 确认 CPU、GPU CUDA 12 和 GPU CUDA 13 版本的 Windows x64 ZIP 都已上传。
             - 抽查一个 ZIP，确认包含 `manifest.json`、`bin/`、`models/ppocr-v5-mobile/` 和管理页 JS。
             - 如为正式版本，确认版本号与 `manifest.json`、`package.json` 保持一致后再发布。
 
             ### 发布包
             本次流水线会上传以下平台的离线插件 ZIP：
 
-            - `paddle-ocr-v*-windows-x64-cpu.zip` (内置 CPU 版 ONNX Runtime，体积小)
-            - `paddle-ocr-v*-windows-x64-gpu.zip` (内置 GPU 版 ONNX Runtime，支持 CUDA 12 加速)
+            - `aiohub-paddle-ocr-v*-windows-x64-cpu.zip` (内置 CPU 版 ONNX Runtime，体积小)
+            - `aiohub-paddle-ocr-v*-windows-x64-gpu-cuda12.zip` (内置 GPU CUDA 12 版 ONNX Runtime)
+            - `aiohub-paddle-ocr-v*-windows-x64-gpu-cuda13.zip` (内置 GPU CUDA 13 版 ONNX Runtime)
 
             ### 使用说明
             在 AIO Hub 插件管理页面选择本机平台对应的 ZIP 手动导入。发布包已包含 PaddleOCR sidecar、管理页、manifest 和 PP-OCRv5 Mobile 模型文件。

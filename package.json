@@ -8,9 +8,9 @@
     "build:rust": "cargo build",
     "build:rust:release": "cargo build --release",
     "build:vue": "bun x vite build",
-    "package": "bun build.js --release --package --gpu",
-    "clean": "cargo clean && bun x rimraf dist dist-ui *.zip",
-    "download-ort-gpu": "node download-ort-gpu.js"
+    "download-ort": "node download-ort.js",
+    "package": "bun build.js --release --package --variant=all",
+    "clean": "cargo clean && bun x rimraf dist dist-ui *.zip"
   },
   "keywords": [
     "aio-hub",
